@@ -3,6 +3,7 @@ from __future__ import division
 from __future__ import print_function
 import os
 import sys
+import errno
 import argparse
 import accountslib
 
@@ -133,4 +134,8 @@ def fail(message):
 
 
 if __name__ == '__main__':
-  main()
+  try:
+    main()
+  except IOError as ioe:
+    if ioe.errno != errno.EPIPE:
+      raise

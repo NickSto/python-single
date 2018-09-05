@@ -65,9 +65,12 @@ def main(argv):
     if args.download:
       #TODO: Allow skipping if the video was added to the playlist very recently.
       #      The video added date is in playlist['items'][i]['snippet']['publishedAt'].
+      #TODO: Allow updating files to stay synced with playlist: delete videos removed from the
+      #      playlist, rename files when index changes.
       if video_id in downloaded_videos:
         logging.warning('Video appears already downloaded. Skipping..')
       else:
+        errors = []
         if args.meta:
           pass
         elif isinstance(video, str):
@@ -76,8 +79,8 @@ def main(argv):
           logging.warning('Video too long to be downloaded. Skipping..')
         else:
           logging.warning('Downloading..')
-          download_video(video_id, args.download, prefix='{} - '.format(i+1))
-        save_metadata(args.download, i+1, video_id, video, channel)
+          filename, errors = download_video(video_id, args.download, prefix='{} - '.format(i+1))
+        save_metadata(args.download, i+1, video_id, video, channel, errors)
     print()
 
 
@@ -109,18 +112,18 @@ https://www.youtube.com/watch?v={video_id}""".format(
     )
 
 
-def format_metadata_yaml(video_id, video_data, channel_data):
+def format_metadata_yaml(video_id, video_data, channel_data, errors=()):
   if isinstance(video_data, str):
     return '{}: True\nurl: https://www.youtube.com/watch?v={}'.format(video_data, video_id)
   else:
     description = '\n  '.join(video_data['snippet']['description'].splitlines())
-    return """title: {title}
-  url: https://www.youtube.com/watch?v={video_id}
-  channel: {channel_title}
-  channelUrl: https://www.youtube.com/channel/{channel_id}
-  uploaded: {upload_date}
-  length: {length}
-  description: |
+    yaml_str = """title: {title}
+url: https://www.youtube.com/watch?v={video_id}
+channel: {channel_title}
+channelUrl: https://www.youtube.com/channel/{channel_id}
+uploaded: {upload_date}
+length: {length}
+description: |
     {description}""".format(
       title=video_data['snippet']['title'],
       channel_title=channel_data['snippet']['title'],
@@ -130,12 +133,15 @@ def format_metadata_yaml(video_id, video_data, channel_data):
       length=parse_duration(video_data['contentDetails']['duration']),
       description=description
     )
+    if 'blocked' in errors:
+      yaml_str += '\nblocked: True'
+    return yaml_str
 
 
-def save_metadata(dest_dir, index, video_id, video_data, channel_data):
+def save_metadata(dest_dir, index, video_id, video_data, channel_data, errors=()):
   meta_path = os.path.join(dest_dir, '{}.metadata.yaml'.format(index))
   with open(meta_path, 'w') as meta_file:
-    meta_file.write(format_metadata_yaml(video_id, video_data, channel_data)+'\n')
+    meta_file.write(format_metadata_yaml(video_id, video_data, channel_data, errors)+'\n')
 
 
 def parse_duration(dur_str):
@@ -245,22 +251,10 @@ def download_video(video_id, destination, quality='18', prefix=''):
         if error.exc_info[1].args[0] == 'requested format not available':
           del ydl_opts['format']
           call_youtube_dl(video_id, ydl_opts)
-    if DownloadMetadata['merged']:
-      logging.debug('Video created from merged video/audio.')
-      filename = DownloadMetadata['merged']
-    elif len(DownloadMetadata['titles']) == 1:
-      filename = DownloadMetadata['titles'][0]
-    elif len(DownloadMetadata['titles']) == 0:
-      fail('Error: failed to determine filename of downloaded video {}'.format(video_id))
-    elif len(DownloadMetadata['titles']) > 1:
-      fail('Error: found multiple potential filenames for downloaded video {}:\n{}'
-           .format(video_id, '\n'.join(DownloadMetadata['titles'])))
-    now = time.time()
-    try:
-      os.utime(filename, (now, now))
-    except FileNotFoundError:
-      fail('Error: Downloaded video {}, but downloaded file not found.'.format(filename))
-    return filename
+    filename = get_video_filename(DownloadMetadata, video_id)
+    if filename is not None:
+      set_date_modified(filename, DownloadMetadata['errors'])
+    return filename, DownloadMetadata['errors']
   finally:
     os.chdir(prev_dir)
 
@@ -268,11 +262,45 @@ def download_video(video_id, destination, quality='18', prefix=''):
 def call_youtube_dl(video_id, ydl_opts):
   DownloadMetadata['titles'] = []
   DownloadMetadata['merged'] = None
+  DownloadMetadata['errors'] = []
   with youtube_dl.YoutubeDL(ydl_opts) as ydl:
     ydl.download(['https://www.youtube.com/watch?v={}'.format(video_id)])
 
 
-DownloadMetadata = {'titles':[], 'merged':None}
+def get_video_filename(download_metadata, video_id):
+  if download_metadata['merged']:
+    logging.debug('Video created from merged video/audio.')
+    filename = download_metadata['merged']
+  elif len(download_metadata['titles']) == 1:
+    filename = download_metadata['titles'][0]
+  elif download_metadata['errors']:
+    for error in download_metadata['errors']:
+      if error == 'blocked':
+        logging.error('Error: Video {} blocked.'.format(video_id))
+    if not download_metadata['errors']:
+      logging.error('Error: Video {} not downloaded.'.format(video_id))
+    filename = None
+  elif len(download_metadata['titles']) == 0:
+    fail('Error: failed to determine filename of downloaded video {}'.format(video_id))
+  elif len(download_metadata['titles']) > 1:
+    fail('Error: found multiple potential filenames for downloaded video {}:\n{}'
+         .format(video_id, '\n'.join(download_metadata['titles'])))
+  return filename
+
+
+def set_date_modified(path, errors):
+  now = time.time()
+  try:
+    os.utime(path, (now, now))
+  except FileNotFoundError:
+    if not errors:
+      fail('Error: Downloaded video {}, but downloaded file not found.'.format(path))
+
+
+# Define global dict to workaround problem that some data is only available from log messages that
+# can only be obtained by intercepting in a hook (no other way to return the data).
+DownloadMetadata = {'titles':[], 'merged':None, 'errors':[]}
+
 class YoutubeDlLogger(object):
   def debug(self, message):
     # Ignore standard messages.
@@ -301,6 +329,10 @@ class YoutubeDlLogger(object):
   def warning(self, message):
     logging.warning(message)
   def error(self, message):
+    if message.startswith('\x1b[0;31mERROR:\x1b[0m This video contains content from '):
+      if message.endswith('. It is not available.'):
+        DownloadMetadata['errors'].append('blocked')
+        return
     logging.error(message)
   def critical(self, message):
     logging.critical(message)

@@ -26,7 +26,7 @@ def make_argparser():
          'to a text file, one per video.')
   parser.add_argument('-m', '--meta', action='store_true',
     help='Just save metadata file on each video.')
-  parser.add_argument('-M', '--max-length', type=int,
+  parser.add_argument('-M', '--max-length', type=int, default=999999,
     help='Don\'t download videos longer than this. Give a time, in minutes. The metadata file '
          'will still be created, though.')
   parser.add_argument('--max-results', type=int, default=50,

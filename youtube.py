@@ -3,6 +3,7 @@ import argparse
 import logging
 import os
 import re
+import shutil
 import sys
 import time
 import requests
@@ -13,7 +14,7 @@ except ImportError:
 assert sys.version_info.major >= 3, 'Python 3 required'
 
 API_URL = 'https://www.googleapis.com/youtube/v3/'
-DESCRIPTION = """"""
+DESCRIPTION = """Download videos from a Youtube playlist and save their metadata."""
 
 
 def make_argparser():
@@ -21,6 +22,9 @@ def make_argparser():
   parser.add_argument('api_key')
   parser.add_argument('playlist_id',
     help='The playlist id.')
+  #TODO:
+  # parser.add_argument('-D', '--dedup', nargs='+',
+  #   help='Deduplicate the videos in these directories.')
   parser.add_argument('-d', '--download',
     help='Download the videos to this directory too. This will also save metadata on each video '
          'to a text file, one per video.')
@@ -50,37 +54,49 @@ def main(argv):
   logging.basicConfig(stream=args.log, level=args.volume, format='%(message)s')
 
   if args.download:
-    downloaded_videos = read_video_dir(args.download)
+    if youtube_dl is None:
+      fail('Error: youtube_dl package required for --download.')
+  downloaded = read_video_dir(args.download)
 
   playlist = fetch_playlist(args.api_key, args.playlist_id, args.max_results)
 
-  for i, playlist_video in enumerate(playlist['items']):
+  for playlist_video in playlist['items']:
+    index = playlist_video['snippet']['position']+1
+    metadata = {'playlist_item':playlist_video}
     video_id = playlist_video['snippet']['resourceId']['videoId']
-    video = fetch_video(args.api_key, video_id)
-    if isinstance(video, str):
-      channel = None
+    video, reason = fetch_video(args.api_key, video_id)
+    metadata['video'] = video
+    metadata['video_id'] = video_id
+    if video is None:
+      metadata['missing_reason'] = reason
+      metadata['channel'] = None
     else:
-      channel = fetch_channel(args.api_key, video['snippet']['channelId'])
-    print(format_metadata_human(i+1, video_id, video, channel))
+      metadata['channel'] = fetch_channel(args.api_key, video['snippet']['channelId'])
+    print(format_metadata_human(index, metadata))
     if args.download:
       #TODO: Allow skipping if the video was added to the playlist very recently.
       #      The video added date is in playlist['items'][i]['snippet']['publishedAt'].
       #TODO: Allow updating files to stay synced with playlist: delete videos removed from the
       #      playlist, rename files when index changes.
-      if video_id in downloaded_videos:
-        logging.warning('Video appears already downloaded. Skipping..')
+      errors = []
+      skip_download = False
+      if video_id in downloaded:
+        #TODO: Also delete videos not on the playlist anymore.
+        move_files(downloaded, video_id, index)
+        if 'file' in downloaded[video_id]:
+          skip_download = True
+      if skip_download:
+        logging.warning('Video already downloaded. Skipping..')
+      elif args.meta:
+        pass
+      elif video is None:
+        logging.warning('Video not found. Skipping download..')
+      elif parse_duration(video['contentDetails']['duration']) > args.max_length*60:
+        logging.warning('Video too long to be downloaded. Skipping..')
       else:
-        errors = []
-        if args.meta:
-          pass
-        elif isinstance(video, str):
-          logging.warning('Video missing. Skipping download..')
-        elif parse_duration(video['contentDetails']['duration']) > args.max_length*60:
-          logging.warning('Video too long to be downloaded. Skipping..')
-        else:
-          logging.warning('Downloading..')
-          filename, errors = download_video(video_id, args.download, prefix='{} - '.format(i+1))
-        save_metadata(args.download, i+1, video_id, video, channel, errors)
+        logging.warning('Downloading..')
+        filename, errors = download_video(video_id, args.download, prefix='{} - '.format(index))
+      save_metadata(args.download, index, metadata, errors)
     print()
 
 
@@ -88,60 +104,122 @@ def read_video_dir(dirpath):
   videos = {}
   for filename in os.listdir(dirpath):
     fields = filename.split('.')
-    if not (len(fields) >= 2 and fields[-2].endswith(']') and fields[-2][-16:-12] == '[id '):
-      continue
-    video_id = fields[-2][-12:-1]
-    videos[video_id] = filename
+    if filename.endswith('.metadata.yaml') and len(fields) == 4:
+      # Read metadata file.
+      try:
+        index = int(fields[0])
+      except ValueError:
+        continue
+      video_id = fields[1]
+      video_data = videos.get(video_id, {})
+      video_data['dir'] = dirpath
+      video_data['index'] = index
+      video_data['meta'] = filename
+      videos[video_id] = video_data
+    else:
+      # Read video file.
+      if not (len(fields) >= 2 and fields[-2].endswith(']') and fields[-2][-16:-12] == '[id '):
+        continue
+      video_id = fields[-2][-12:-1]
+      fields = filename.split(' - ')
+      index = int(fields[0])
+      video_data = videos.get(video_id, {})
+      video_data['dir'] = dirpath
+      video_data['index'] = index
+      video_data['file'] = filename
+      video_data['name'] = ' - '.join(fields[1:])
+      videos[video_id] = video_data
   return videos
 
 
-def format_metadata_human(index, video_id, video_data, channel_data):
-  if isinstance(video_data, str):
-    return '{}: [{}]\nhttps://www.youtube.com/watch?v={}'.format(index, video_data, video_id)
+def move_files(downloaded, video_id, index):
+  """Check if the current video has already been downloaded, but with a different name, then move it
+  to the proper name.
+  Do the same with metadata files."""
+  if video_id not in downloaded:
+    return False
+  metadata = downloaded[video_id]
+  if index == metadata['index']:
+    return False
+  logging.warning('Video {} already saved. Renumbering from {} to {}..'
+                  .format(video_id, metadata['index'], index))
+  # Move the video file.
+  if 'file' in metadata:
+    old_path = os.path.join(metadata['dir'], metadata['file'])
+    new_path = os.path.join(metadata['dir'], '{} - {}'.format(index, metadata['name']))
+    check_and_move(old_path, new_path)
+  # Move the metadata file.
+  if 'meta' in metadata:
+    old_path = os.path.join(metadata['dir'], metadata['meta'])
+    new_path = os.path.join(metadata['dir'], '{}.{}.metadata.yaml'.format(index, video_id))
+    check_and_move(old_path, new_path)
+  return True
+
+
+def check_and_move(src, dst):
+  if os.path.exists(dst):
+    fail('Error: Cannot move file {!r}. Destination {!r} already exists.'.format(src, dst))
+  try:
+    shutil.move(src, dst)
+  except FileNotFoundError:
+    fail('Error: Cannot move file {!r} (file not found).'.format(src))
+  except PermissionError as error:
+    fail('Error: Cannot move file {!r}. {}: {}'.format(src, type(error).__name__, error.args[1]))
+
+
+def format_metadata_human(index, metadata):
+  if metadata['video'] is None:
+    return '{}: [{missing_reason}]\nhttps://www.youtube.com/watch?v={video_id}'.format(index, **metadata)
   else:
     return """{:<3s} {title}
 Channel: {channel_title} - https://www.youtube.com/channel/{channel_id}
 Upload date: {upload_date}
 https://www.youtube.com/watch?v={video_id}""".format(
       str(index)+':',
-      title=video_data['snippet']['title'],
-      channel_title=channel_data['snippet']['title'],
-      channel_id=channel_data['id'],
-      upload_date=video_data['snippet']['publishedAt'][:10],
-      video_id=video_id
+      title=metadata['video']['snippet']['title'],
+      channel_title=metadata['channel']['snippet']['title'],
+      channel_id=metadata['channel']['id'],
+      upload_date=metadata['video']['snippet']['publishedAt'][:10],
+      video_id=metadata['video_id']
     )
 
 
-def format_metadata_yaml(video_id, video_data, channel_data, errors=()):
-  if isinstance(video_data, str):
-    return '{}: True\nurl: https://www.youtube.com/watch?v={}'.format(video_data, video_id)
+def format_metadata_yaml(metadata, errors=()):
+  if metadata['video'] is None:
+    return '{missing_reason}: true\nurl: https://www.youtube.com/watch?v={video_id}'.format(**metadata)
   else:
-    description = '\n  '.join(video_data['snippet']['description'].splitlines())
+    description = '\n  '.join(metadata['video']['snippet']['description'].splitlines())
     yaml_str = """title: {title}
 url: https://www.youtube.com/watch?v={video_id}
 channel: {channel_title}
 channelUrl: https://www.youtube.com/channel/{channel_id}
 uploaded: {upload_date}
+addedToPlaylist: {add_date}
 length: {length}
 description: |
-    {description}""".format(
-      title=video_data['snippet']['title'],
-      channel_title=channel_data['snippet']['title'],
-      channel_id=channel_data['id'],
-      upload_date=video_data['snippet']['publishedAt'][:10],
-      video_id=video_id,
-      length=parse_duration(video_data['contentDetails']['duration']),
+  {description}""".format(
+      title=metadata['video']['snippet']['title'],
+      channel_title=metadata['channel']['snippet']['title'],
+      channel_id=metadata['channel']['id'],
+      upload_date=metadata['video']['snippet']['publishedAt'][:10],
+      add_date=metadata['playlist_item']['snippet']['publishedAt'][:10],
+      video_id=metadata['video_id'],
+      length=parse_duration(metadata['video']['contentDetails']['duration']),
       description=description
     )
-    if 'blocked' in errors:
-      yaml_str += '\nblocked: True'
+    for error in set(errors):
+      if error != 'exists':
+        yaml_str += '\n{}: true'.format(error)
     return yaml_str
 
 
-def save_metadata(dest_dir, index, video_id, video_data, channel_data, errors=()):
-  meta_path = os.path.join(dest_dir, '{}.metadata.yaml'.format(index))
+def save_metadata(dest_dir, index, metadata, errors=()):
+  meta_path = os.path.join(dest_dir, '{}.{}.metadata.yaml'.format(index, metadata['video_id']))
+  if os.path.exists(meta_path):
+    logging.warning('Warning: Metadata file {} already exists. Avoiding overwrite..'
+                    .format(meta_path))
   with open(meta_path, 'w') as meta_file:
-    meta_file.write(format_metadata_yaml(video_id, video_data, channel_data, errors)+'\n')
+    meta_file.write(format_metadata_yaml(metadata, errors)+'\n')
 
 
 def parse_duration(dur_str):
@@ -200,11 +278,11 @@ def fetch_video(api_key, video_id):
   }
   data = call_api('videos', params, api_key)
   if data['items']:
-    return data['items'][0]
+    return data['items'][0], None
   elif data['pageInfo']['totalResults'] == 1:
-    return 'deleted'
+    return None, 'deleted'
   else:
-    return 'private'
+    return None, 'private'
 
 
 def call_api(api_name, params, api_key):
@@ -277,6 +355,12 @@ def get_video_filename(download_metadata, video_id):
     for error in download_metadata['errors']:
       if error == 'blocked':
         logging.error('Error: Video {} blocked.'.format(video_id))
+      elif error == 'restricted':
+        logging.warning('Error: Video {} restricted and unavailable.'.format(video_id))
+      elif error == 'unavailable':
+        logging.warning('Error: Video {} unavailable.'.format(video_id))
+      elif error == 'exists':
+        logging.warning('Video already downloaded. Skipping..')
     if not download_metadata['errors']:
       logging.error('Error: Video {} not downloaded.'.format(video_id))
     filename = None
@@ -317,9 +401,13 @@ class YoutubeDlLogger(object):
     elif message.startswith('Deleting original file '):
       return
     # Extract video title info from log messages.
-    if message.startswith('[download] Destination: '):
-      DownloadMetadata['titles'].append(message[24:])
-      return
+    if message.startswith('[download]'):
+      if message[10:24] == ' Destination: ':
+        DownloadMetadata['titles'].append(message[24:])
+        return
+      elif (message.endswith('has already been downloaded and merged') or
+          message.endswith('has already been downloaded')):
+        DownloadMetadata['errors'].append('exists')
     elif message.startswith('[ffmpeg] Merging formats into '):
       DownloadMetadata['merged'] = message[31:-1]
       return
@@ -329,9 +417,25 @@ class YoutubeDlLogger(object):
   def warning(self, message):
     logging.warning(message)
   def error(self, message):
-    if message.startswith('\x1b[0;31mERROR:\x1b[0m This video contains content from '):
-      if message.endswith('. It is not available.'):
+    #TODO: Blocked videos seem to list that fact in
+    #      video['contentDetails']['regionRestriction']['blocked'] (it's a list of countries it's
+    #      blocked in). Could just check for 'US' in that list. Note: according to the documentation,
+    #      an empty list means it's not blocked anywhere. There's also an 'allowed' list that may
+    #      be there instead. If it is, it's viewable everywhere not on that list (even if it's empty).
+    #      See https://developers.google.com/youtube/v3/docs/videos#contentDetails.regionRestriction
+    if message.startswith('\x1b[0;31mERROR:\x1b[0m'):
+      if (message[17:51] == ' This video contains content from ' and (
+            message.endswith('. It is not available.') or
+            message.endswith('. It is not available in your country.') or
+            message.endswith(', who has blocked it on copyright grounds.') or
+            message.endswith(', who has blocked it in your country on copyright grounds.'))):
         DownloadMetadata['errors'].append('blocked')
+        return
+      elif message[17:] == ' The uploader has not made this video available.':
+        DownloadMetadata['errors'].append('restricted')
+        return
+      elif message[17:] == ' This video is not available.':
+        DownloadMetadata['errors'].append('unavailable')
         return
     logging.error(message)
   def critical(self, message):

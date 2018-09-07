@@ -7,6 +7,7 @@ import shutil
 import sys
 import time
 import requests
+import yaml
 try:
   import youtube_dl
 except ImportError:
@@ -22,9 +23,6 @@ def make_argparser():
   parser.add_argument('api_key')
   parser.add_argument('playlist_id',
     help='The playlist id.')
-  #TODO:
-  # parser.add_argument('-D', '--dedup', nargs='+',
-  #   help='Deduplicate the videos in these directories.')
   parser.add_argument('-d', '--download',
     help='Download the videos to this directory too. This will also save metadata on each video '
          'to a text file, one per video.')
@@ -42,7 +40,7 @@ def make_argparser():
   volume.add_argument('-q', '--quiet', dest='volume', action='store_const', const=logging.CRITICAL,
     default=logging.WARNING)
   volume.add_argument('-v', '--verbose', dest='volume', action='store_const', const=logging.INFO)
-  volume.add_argument('-D', '--debug', dest='volume', action='store_const', const=logging.DEBUG)
+  volume.add_argument('--debug', dest='volume', action='store_const', const=logging.DEBUG)
   return parser
 
 
@@ -56,7 +54,7 @@ def main(argv):
   if args.download:
     if youtube_dl is None:
       fail('Error: youtube_dl package required for --download.')
-  downloaded = read_video_dir(args.download)
+  downloaded = read_downloaded_video_dir(args.download)
 
   playlist = fetch_playlist(args.api_key, args.playlist_id, args.max_results)
 
@@ -76,15 +74,16 @@ def main(argv):
     if args.download:
       #TODO: Allow skipping if the video was added to the playlist very recently.
       #      The video added date is in playlist['items'][i]['snippet']['publishedAt'].
-      #TODO: Allow updating files to stay synced with playlist: delete videos removed from the
-      #      playlist, rename files when index changes.
       errors = []
+      filename = None
       skip_download = False
       if video_id in downloaded:
-        #TODO: Also delete videos not on the playlist anymore.
+        video_data = downloaded[video_id]
         move_files(downloaded, video_id, index)
-        if 'file' in downloaded[video_id]:
+        video_data['verified'] = True
+        if 'file' in video_data or video_data.get('downloaded'):
           skip_download = True
+          filename = video_data.get('file')
       if skip_download:
         logging.warning('Video already downloaded. Skipping..')
       elif args.meta:
@@ -96,11 +95,27 @@ def main(argv):
       else:
         logging.warning('Downloading..')
         filename, errors = download_video(video_id, args.download, prefix='{} - '.format(index))
-      save_metadata(args.download, index, metadata, errors)
+      save_metadata(args.download, index, metadata, filename, errors)
     print()
 
+  if args.download:
+    trash_dir = os.path.join(args.download, 'trash')
+    for video_id, video_data in downloaded.items():
+      if not video_data['verified']:
+        if not os.path.isdir(trash_dir):
+          os.makedirs(trash_dir)
+        logging.warning('Video {} does not seem to be in the playlist anymore. Moving to {}..'
+                        .format(video_id, trash_dir))
+        if 'file' in video_data:
+          path = os.path.join(video_data['dir'], video_data['file'])
+          shutil.move(path, os.path.join(trash_dir, video_data['file']))
+        if 'meta' in video_data:
+          path = os.path.join(video_data['dir'], video_data['meta'])
+          shutil.move(path, os.path.join(trash_dir, video_data['meta']))
 
-def read_video_dir(dirpath):
+
+def read_downloaded_video_dir(dirpath):
+  """Find existing video and metadata files previously downloaded by this script."""
   videos = {}
   for filename in os.listdir(dirpath):
     fields = filename.split('.')
@@ -110,26 +125,68 @@ def read_video_dir(dirpath):
         index = int(fields[0])
       except ValueError:
         continue
+      with open(os.path.join(dirpath, filename), 'r') as meta_file:
+        metadata = yaml.safe_load(meta_file)
       video_id = fields[1]
       video_data = videos.get(video_id, {})
-      video_data['dir'] = dirpath
       video_data['index'] = index
       video_data['meta'] = filename
+      if metadata.get('downloaded'):
+        video_data['downloaded'] = True
       videos[video_id] = video_data
     else:
-      # Read video file.
-      if not (len(fields) >= 2 and fields[-2].endswith(']') and fields[-2][-16:-12] == '[id '):
+      # Read video filename.
+      video_id = parse_video_id(filename, strict=True)
+      if video_id is None:
         continue
       video_id = fields[-2][-12:-1]
       fields = filename.split(' - ')
       index = int(fields[0])
       video_data = videos.get(video_id, {})
-      video_data['dir'] = dirpath
       video_data['index'] = index
       video_data['file'] = filename
       video_data['name'] = ' - '.join(fields[1:])
       videos[video_id] = video_data
+  for video_id, video_data in videos.items():
+    video_data['dir'] = dirpath
+    # verified: Whether this has been verified to still be in the playlist (deafault to False).
+    video_data['verified'] = False
   return videos
+
+
+def read_existing_video_dir(dirpath):
+  """Search for any video files that include their video id in the filename."""
+  videos_by_id = {}
+  videos_by_channel = {}
+  for dirpath, dirnames, filenames in os.walk(dirpath):
+    for filename in filenames:
+      video_id = parse_video_id(filename, strict=False)
+      if video_id is not None:
+        videos[video_id] = {'dir':dirpath, 'file':filename}
+  return videos
+
+
+def parse_video_id(filename, strict=True):
+  """Try to retrieve a video id from a filename."""
+  if strict:
+    # The id must be within ' [id XXXXXXXXXXX]' at the end of the filename (right before the
+    # file extension).
+    fields = filename.split('.')
+    if len(fields) < 2 or not fields[-2].endswith(']') or fields[-2][-17:-12] != ' [id ':
+      return None
+    video_id = fields[-2][-12:-1]
+    if re.search(r'[^0-9A-Za-z_-]', video_id):
+      return None
+  else:
+    i = filename.find(' [id ')
+    if i != -1 and len(filename) > i+16 and filename[i+16] == ']':
+      # Find a ' [id XXXXXXXXXXX]' anywhere in the filename?
+      video_id = filename[i+5:i+16]
+      if re.search(r'[^0-9A-Za-z_-]', video_id):
+        return None
+    else:
+      return None
+  return video_id
 
 
 def move_files(downloaded, video_id, index):
@@ -184,12 +241,13 @@ https://www.youtube.com/watch?v={video_id}""".format(
     )
 
 
-def format_metadata_yaml(metadata, errors=()):
+def format_metadata_yaml(metadata, got_file, errors=()):
+  #TODO: Use a real yaml library, but one that preserves the order of the keys.
   if metadata['video'] is None:
     return '{missing_reason}: true\nurl: https://www.youtube.com/watch?v={video_id}'.format(**metadata)
   else:
     description = '\n  '.join(metadata['video']['snippet']['description'].splitlines())
-    yaml_str = """title: {title}
+    yaml_str = """title: {title!r}
 url: https://www.youtube.com/watch?v={video_id}
 channel: {channel_title}
 channelUrl: https://www.youtube.com/channel/{channel_id}
@@ -210,16 +268,23 @@ description: |
     for error in set(errors):
       if error != 'exists':
         yaml_str += '\n{}: true'.format(error)
+    if got_file:
+      yaml_str += '\ndownloaded: true'
     return yaml_str
 
 
-def save_metadata(dest_dir, index, metadata, errors=()):
+def save_metadata(dest_dir, index, metadata, filename, errors=()):
+  if filename is None:
+    got_file = False
+  else:
+    video_path = os.path.join(dest_dir, filename)
+    got_file = os.path.isfile(video_path) and os.path.getsize(video_path) > 0
   meta_path = os.path.join(dest_dir, '{}.{}.metadata.yaml'.format(index, metadata['video_id']))
   if os.path.exists(meta_path):
     logging.warning('Warning: Metadata file {} already exists. Avoiding overwrite..'
                     .format(meta_path))
   with open(meta_path, 'w') as meta_file:
-    meta_file.write(format_metadata_yaml(metadata, errors)+'\n')
+    meta_file.write(format_metadata_yaml(metadata, got_file, errors)+'\n')
 
 
 def parse_duration(dur_str):

@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 import argparse
+import collections
 import logging
 import os
 import re
@@ -7,7 +8,7 @@ import shutil
 import sys
 import time
 import requests
-import yaml
+from oyaml import oyaml as yaml
 try:
   import youtube_dl
 except ImportError:
@@ -156,8 +157,7 @@ def read_downloaded_video_dir(dirpath):
 
 def read_existing_video_dir(dirpath):
   """Search for any video files that include their video id in the filename."""
-  videos_by_id = {}
-  videos_by_channel = {}
+  videos = {}
   for dirpath, dirnames, filenames in os.walk(dirpath):
     for filename in filenames:
       video_id = parse_video_id(filename, strict=False)
@@ -242,35 +242,30 @@ https://www.youtube.com/watch?v={video_id}""".format(
 
 
 def format_metadata_yaml(metadata, got_file, errors=()):
-  #TODO: Use a real yaml library, but one that preserves the order of the keys.
+  output = collections.OrderedDict()
+  output['url'] = 'https://www.youtube.com/watch?v='+metadata['video_id']
   if metadata['video'] is None:
-    return '{missing_reason}: true\nurl: https://www.youtube.com/watch?v={video_id}'.format(**metadata)
+    output[metadata['missing_reason']] = True
   else:
-    description = '\n  '.join(metadata['video']['snippet']['description'].splitlines())
-    yaml_str = """title: {title!r}
-url: https://www.youtube.com/watch?v={video_id}
-channel: {channel_title}
-channelUrl: https://www.youtube.com/channel/{channel_id}
-uploaded: {upload_date}
-addedToPlaylist: {add_date}
-length: {length}
-description: |
-  {description}""".format(
-      title=metadata['video']['snippet']['title'],
-      channel_title=metadata['channel']['snippet']['title'],
-      channel_id=metadata['channel']['id'],
-      upload_date=metadata['video']['snippet']['publishedAt'][:10],
-      add_date=metadata['playlist_item']['snippet']['publishedAt'][:10],
-      video_id=metadata['video_id'],
-      length=parse_duration(metadata['video']['contentDetails']['duration']),
-      description=description
-    )
+    output['title'] = metadata['video']['snippet']['title']
+    output['channel'] = metadata['channel']['snippet']['title']
+    output['channelUrl'] = 'https://www.youtube.com/channel/'+metadata['channel']['id']
+    output['uploaded'] = metadata['video']['snippet']['publishedAt'][:10]
+    output['addedToPlaylist'] = metadata['playlist_item']['snippet']['publishedAt'][:10]
+    output['length'] = parse_duration(metadata['video']['contentDetails']['duration'])
+    # Do some cleaning of the description string to let it appear as a clean literal in the yaml
+    # file. Human readability is more important than 100% fidelity here, since we're just trying to
+    # archive the description to give some sense of the context.
+    # Note: PyYAML will output strings with newlines as literal line breaks (readable), unless there
+    # is whitespace at the start or end of any line in the string.
+    desc_lines = metadata['video']['snippet']['description'].splitlines()
+    output['description'] = '\n'.join([line.strip() for line in desc_lines])
     for error in set(errors):
       if error != 'exists':
-        yaml_str += '\n{}: true'.format(error)
+        output[error] = True
     if got_file:
-      yaml_str += '\ndownloaded: true'
-    return yaml_str
+      output['downloaded'] = True
+  return yaml.dump(output, default_flow_style=False)
 
 
 def save_metadata(dest_dir, index, metadata, filename, errors=()):

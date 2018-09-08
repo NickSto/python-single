@@ -4,3 +4,6 @@
 [submodule "bfx"]
 	path = bfx
 	url = https://github.com/makrutenko/common.git
+[submodule "oyaml"]
+	path = oyaml
+	url = https://github.com/wimglenn/oyaml.git

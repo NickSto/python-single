@@ -1,0 +1,19 @@
+Filesystem                                  Size  Used Avail Use% Mounted on
+/dev/dm-0                                    46G   19G   26G  43% /
+udev                                         10M     0   10M   0% /dev
+tmpfs                                       6.4G  665M  5.7G  11% /run
+tmpfs                                        16G  4.0K   16G   1% /dev/shm
+tmpfs                                       5.0M     0  5.0M   0% /run/lock
+tmpfs                                        16G     0   16G   0% /sys/fs/cgroup
+/dev/sda2                                   465M  121M  320M  28% /boot
+/dev/mapper/vg0-space                       2.2T  1.6T  661G  71% /space
+tmpfs                                       3.2G     0  3.2G   0% /run/user/113
+AFS                                         8.6G     0  8.6G   0% /afs
+tmpfs                                       3.2G     0  3.2G   0% /run/user/1368
+smart4.p.bx.psu.edu:/zones/nfsroot/scratch   32T   32T  1.5G 100% /nfs/brubeck.bx.psu.edu/scratch3
+tmpfs                                       3.2G   16K  3.2G   1% /run/user/1117
+smart5.p.bx.psu.edu:/zones/nfsroot/scratch   64T   64T  6.2G 100% /nfs/brubeck.bx.psu.edu/scratch4
+tmpfs                                       3.2G     0  3.2G   0% /run/user/1358
+camel.p.bx.psu.edu:/zones/nfsroot/home       16T  8.4T  7.3T  54% /nfs/thumper.galaxyproject.org/home
+tmpfs                                       3.2G     0  3.2G   0% /run/user/1379
+tmpfs                                       3.2G     0  3.2G   0% /run/user/1362

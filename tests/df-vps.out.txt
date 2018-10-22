@@ -1,0 +1,2 @@
+Filesystem              Size              Used              Avail              Use%          Mounted
+/dev/vda1               20G               3.9G              16G                21%           /

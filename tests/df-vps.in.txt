@@ -1,0 +1,14 @@
+Filesystem      Size  Used Avail Use% Mounted on
+udev            487M     0  487M   0% /dev
+tmpfs           100M   11M   89M  11% /run
+/dev/vda1        20G  3.9G   16G  21% /
+tmpfs           497M  4.0K  497M   1% /dev/shm
+tmpfs           5.0M     0  5.0M   0% /run/lock
+tmpfs           497M     0  497M   0% /sys/fs/cgroup
+/dev/loop3      5.0M  5.0M     0 100% /snap/canonical-livepatch/42
+/dev/loop5       88M   88M     0 100% /snap/core/5328
+tmpfs           100M     0  100M   0% /run/user/1000
+/dev/loop6       88M   88M     0 100% /snap/core/5548
+/dev/loop1      4.8M  4.8M     0 100% /snap/canonical-livepatch/49
+/dev/loop2      5.0M  5.0M     0 100% /snap/canonical-livepatch/50
+/dev/loop4       88M   88M     0 100% /snap/core/5662

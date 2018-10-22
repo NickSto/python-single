@@ -1,0 +1,7 @@
+Filesystem                                  Size Used Avail Use% Mounted                            
+/dev/dm-0                                   46G  19G  26G   43%  /
+/dev/sda2                                   465M 121M 320M  28%  /boot
+/dev/mapper/vg0-space                       2.2T 1.6T 661G  71%  /space
+smart4.p.bx.psu.edu:/zones/nfsroot/scratch  32T  32T  1.5G  100% /nfs/brubeck.bx.psu.edu/scratch3
+smart5.p.bx.psu.edu:/zones/nfsroot/scratch  64T  64T  6.2G  100% /nfs/brubeck.bx.psu.edu/scratch4
+camel.p.bx.psu.edu:/zones/nfsroot/home      16T  8.4T 7.3T  54%  /nfs/thumper.galaxyproject.org/home

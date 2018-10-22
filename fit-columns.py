@@ -36,6 +36,8 @@ def make_argparser():
          '("contains"), at the start of the field ("start"), or end ("end"). The second argument '
          'should be the string to match. There is also a 3-argument form, where the first argument '
          'is the column number, the second is the match type, and the third is the match string.')
+  parser.add_argument('-w', '--term-width', type=int, default=console.termwidth(),
+    help='Force the script to think the terminal width is this, instead of auto-detecting it.')
   parser.add_argument('-l', '--log', type=argparse.FileType('w'), default=sys.stderr,
     help='Print log messages to this file instead of to stderr. Warning: Will overwrite the file.')
   volume = parser.add_mutually_exclusive_group()
@@ -62,11 +64,10 @@ def main(argv):
 
   max_widths = get_max_column_widths(lines, omit_cols=args.omit_cols)
 
-  termwidth = console.termwidth()
   if args.expand:
-    max_width = termwidth
+    max_width = args.term_width
   else:
-    max_width = min(termwidth, max_width)
+    max_width = min(args.term_width, max_width)
 
   widths = calculate_column_widths(max_width, max_widths, args.truncated_columns)
 

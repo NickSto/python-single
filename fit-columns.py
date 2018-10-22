@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 import argparse
+import collections
 import logging
 import math
 import sys
@@ -26,6 +27,15 @@ def make_argparser():
     default=True,
     help='Default behavior is to only print the columns shared by all lines. This option includes '
          'every column instead.')
+  parser.add_argument('-x', '--exclude', action='append',
+    help='Exclude lines with this value. Use this option multiple times to specify multiple '
+         'filters. Any line where a field matches this string (exactly) will be excluded. You can '
+         'also give two arguments separated by commas. The first argument can be a number (1-based) '
+         'specifying that only a certain column is to be matched. Or, the first argument can be a '
+         'keyword telling whether to do an exact match ("exact"), match anywhere inside the field '
+         '("contains"), at the start of the field ("start"), or end ("end"). The second argument '
+         'should be the string to match. There is also a 3-argument form, where the first argument '
+         'is the column number, the second is the match type, and the third is the match string.')
   parser.add_argument('-l', '--log', type=argparse.FileType('w'), default=sys.stderr,
     help='Print log messages to this file instead of to stderr. Warning: Will overwrite the file.')
   volume = parser.add_mutually_exclusive_group()
@@ -43,7 +53,12 @@ def main(argv):
 
   logging.basicConfig(stream=args.log, level=args.volume, format='%(message)s')
 
+  excludes = parse_excludes(args.exclude)
+
   lines, max_width = parse_input(args.input)
+
+  excludes_columned, excludes_uncolumned = collate_excludes(excludes)
+  lines = filter_lines(lines, excludes_columned, excludes_uncolumned)
 
   max_widths = get_max_column_widths(lines, omit_cols=args.omit_cols)
 
@@ -56,6 +71,91 @@ def main(argv):
   widths = calculate_column_widths(max_width, max_widths, args.truncated_columns)
 
   print_lines(lines, widths, omit_cols=args.omit_cols, trunc_from=args.trunc_from)
+
+
+def parse_excludes(exclude_list):
+  excludes = []
+  if exclude_list is None:
+    return excludes
+  valid_match_types = {'exact', 'contains', 'start', 'end'}
+  for filter_str in exclude_list:
+    fields = filter_str.split(',')
+    if len(fields) == 1:
+      exclude = {'match':'exact', 'column':'any', 'string':fields[0]}
+    elif len(fields) == 2:
+      try:
+        column = int(fields[0])-1
+        match = 'exact'
+      except ValueError:
+        column = 'any'
+        match = fields[0]
+      if match not in valid_match_types:
+        logging.warning(f'Warning: Invalid --exclude match type {match!r}')
+        continue
+      exclude = {'match':match, 'column':column, 'string':fields[1]}
+    elif len(fields) == 3:
+      try:
+        column = int(fields[0])-1
+      except ValueError:
+        logging.warning(f'Warning: Invalid --exclude column {fields[0]!r}')
+        continue
+      exclude = {'match':fields[1], 'column':column, 'string':fields[2]}
+    excludes.append(exclude)
+  return excludes
+
+
+def collate_excludes(excludes):
+  excludes_uncolumned = collections.defaultdict(set)
+  excludes_columned = collections.defaultdict(lambda: collections.defaultdict(set))
+  for exclude in excludes:
+    if exclude['column'] == 'any':
+      excludes_uncolumned[exclude['match']].add(exclude['string'])
+    else:
+      excludes_columned[exclude['column']][exclude['match']].add(exclude['string'])
+  return excludes_columned, excludes_uncolumned
+
+
+def filter_lines(lines, excludes_columned, excludes_uncolumned):
+  filtered_lines = []
+  for i, line in enumerate(lines):
+    if filter_line(line, excludes_columned, excludes_uncolumned):
+      logging.info(f'Excluding line {i+1}..')
+    else:
+      filtered_lines.append(line)
+  return filtered_lines
+
+
+def filter_line(line, excludes_columned, excludes_uncolumned):
+  for i, field in enumerate(line):
+    if match_field(field, excludes_uncolumned):
+      return True
+    elif i in excludes_columned and match_field(field, excludes_columned[i]):
+      return True
+  return False
+
+
+def match_field(value, queries):
+  for match_type, strings in queries.items():
+    if match_type == 'exact':
+      if value in strings:
+        logging.debug(f'Field {value!r} matches "exact" filter.')
+        return True
+    elif match_type == 'contains':
+      for string in strings:
+        if string in value:
+          logging.debug(f'Field {value!r} matches "contains" filter {string!r}.')
+          return True
+    elif match_type == 'start':
+      for string in strings:
+        if value.startswith(string):
+          logging.debug(f'Field {value!r} matches "start" filter {string!r}.')
+          return True
+    elif match_type == 'end':
+      for string in strings:
+        if value.endswith(string):
+          logging.debug(f'Field {value!r} matches "end" filter {string!r}.')
+          return True
+  return False
 
 
 def parse_input(input_file):

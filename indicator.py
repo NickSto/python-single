@@ -45,43 +45,56 @@ def main(argv):
 
   logging.basicConfig(stream=args.log, level=args.volume, format='%(message)s')
 
-  all_field_functions = get_field_functions()
-  outputs = get_outputs(args.fields, all_field_functions)
-  print(make_output_string(outputs))
+  status = Status(args.fields)
+
+  print(status.get_output_string())
 
 
-def make_output_string(outputs):
-  out_strs = []
-  for output in outputs:
-    if output:
-      if output.startswith('[ ') and output.endswith(' ]'):
-        out_strs.append(output)
+class Status():
+
+  def __init__(self, fields=FIELDS):
+    self.fields = fields
+    self.statuses = None
+
+  def get_output_string(self, statuses=None):
+    if statuses is None:
+      statuses = self.statuses
+    if statuses is None:
+      statuses = self.statuses = self.get_statuses()
+    out_strs = []
+    for status in statuses:
+      if status:
+        if status.startswith('[ ') and status.endswith(' ]'):
+          out_strs.append(status)
+        else:
+          out_strs.append('[ '+status+' ]')
+    return ''.join(out_strs)
+
+  def get_statuses(self, fields=None):
+    if fields is None:
+      fields = self.fields
+    statuses = []
+    for field in fields:
+      status = self.get_status(field)
+      if status is None:
+        logging.warning('Warning: None status from get_'+field+'()')
       else:
-        out_strs.append('[ '+output+' ]')
-  return ''.join(out_strs)
+        statuses.append(str(status))
+    return statuses
 
+  def get_status(self, field):
+    fxn = getattr(self, 'get_'+field, None)
+    if fxn is None:
+      return
+    else:
+      return fxn()
 
-def get_outputs(fields, field_functions):
-  outputs = []
-  for field in fields:
-    if field in field_functions:
-      fxn = field_functions[field]
-      output = fxn()
-      if output is None:
-        logging.warning('Warning: None output from get_'+field+'()')
-      else:
-        outputs.append(str(output))
-  return outputs
+  # Status functions.
 
-
-def get_field_functions():
-  field_functions = {}
-
-  def get_timestamp():
+  def get_timestamp(self):
     return NOW
-  field_functions['timestamp'] = get_timestamp
 
-  def get_ssid():
+  def get_ssid(self):
     max_length = 11
     cmd_output = run_command(['iwconfig'])
     if cmd_output is None:
@@ -97,9 +110,8 @@ def get_field_functions():
       return ssid
     else:
       return ssid[:max_length]+'…'
-  field_functions['ssid'] = get_ssid
 
-  def get_disk():
+  def get_disk(self):
     cmd_output = run_command(['df', '-h'])
     if cmd_output is None:
       return
@@ -116,9 +128,8 @@ def get_field_functions():
       frees.append(free)
     if frees:
       return ','.join(frees)
-  field_functions['disk'] = get_disk
 
-  def get_temp():
+  def get_temp(self):
     cmd_output = run_command(['sensors'])
     if cmd_output is None:
       return
@@ -139,9 +150,8 @@ def get_field_functions():
           except ValueError:
             return
           return '{:0.0f}°C'.format(temp)
-  field_functions['temp'] = get_temp
 
-  def get_worktime():
+  def get_worktime(self):
     contents = read_file(DATA_DIR/'workstatus.txt')
     if contents is None:
       return
@@ -181,9 +191,6 @@ def get_field_functions():
       else:
         output = ratio_str
     return output
-  field_functions['worktime'] = get_worktime
-
-  return field_functions
 
 
 def read_file(path, max_size=4096):

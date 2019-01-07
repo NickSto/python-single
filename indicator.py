@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 import argparse
+import configparser
 import json
 import logging
 import os
@@ -13,12 +14,16 @@ assert sys.version_info.major >= 3, 'Python 3 required'
 DATA_DIR = pathlib.Path('~/.local/share/nbsdata').expanduser()
 NOW = int(time.time())
 
+# List default fields one-per-line for easy commenting out.
 FIELDS = []
+FIELDS.append('wifilogin')
+FIELDS.append('lastping')
+FIELDS.append('pings')
 FIELDS.append('worktime')
-FIELDS.append('disk')
+# FIELDS.append('disk')
 FIELDS.append('temp')
 FIELDS.append('ssid')
-FIELDS.append('timestamp')
+# FIELDS.append('timestamp')
 
 DESCRIPTION = """"""
 
@@ -77,7 +82,7 @@ class Status():
     for field in fields:
       status = self.get_status(field)
       if status is None:
-        logging.warning('Warning: None status from get_'+field+'()')
+        logging.info('Info: None status from get_'+field+'()')
       else:
         statuses.append(str(status))
     return statuses
@@ -94,8 +99,7 @@ class Status():
   def get_timestamp(self):
     return NOW
 
-  def get_ssid(self):
-    max_length = 11
+  def get_ssid(self, max_length=11):
     cmd_output = run_command(['iwconfig'])
     if cmd_output is None:
       return
@@ -106,10 +110,8 @@ class Status():
         ssid = match.group(1)
     if ssid is None:
       return
-    elif len(ssid) <= max_length+1:
-      return ssid
     else:
-      return ssid[:max_length]+'…'
+      return truncate(ssid, max_length)
 
   def get_disk(self):
     cmd_output = run_command(['df', '-h'])
@@ -192,6 +194,135 @@ class Status():
         output = ratio_str
     return output
 
+  def get_pings(self):
+    if not hasattr(self, 'pings'):
+      self.pings, self.lastping = self.get_pings_and_lastping()
+    return self.pings
+
+  def get_lastping(self):
+    if not hasattr(self, 'lastping'):
+      self.pings, self.lastping = self.get_pings_and_lastping()
+    return self.lastping
+
+  def get_pings_and_lastping(self, timeout=300):
+    pings = self.get_provisional_pings()
+    try:
+      latency, timestamp = self.get_last_ping_data()
+    except StatusException as error:
+      return None, error.message
+    if pings is None:
+      return None, None
+    # Check if the last ping was dropped.
+    if latency == 0.0:
+      latency_str = 'DROP'
+    else:
+      latency_str = '{} ms'.format(latency)
+    # How old is the last ping?
+    age = NOW - timestamp
+    age_str = human_time(age)
+    if age < timeout:
+      lastping = '{} / {} ago'.format(latency_str, age_str)
+    else:
+      lastping = 'N/A ms / {} ago'.format(age_str)
+    # If ping is old, and upmonitor doesn't say it's offline, assume it's frozen.
+    if age > timeout and pings != '[OFFLINE]':
+      pings = '[STALLED]'
+    return pings, lastping
+
+  def get_provisional_pings(self):
+    pings = read_file(DATA_DIR/'upstatus.txt')
+    if pings is None:
+      return None
+    else:
+      pings = pings.strip()
+    return pings
+
+  def get_last_ping_data(self):
+    config_file = DATA_DIR/'upmonitor.cfg'
+    if not config_file.is_file():
+      raise StatusException('no upmonitor.cfg')
+    config = configparser.ConfigParser()
+    config.read(config_file)
+    try:
+      log_path = pathlib.Path(config['args']['logfile'])
+    except KeyError:
+      raise StatusException('bad upmonitor.cfg')
+    if not log_path.is_file():
+      raise StatusException('no log')
+    with log_path.open() as log_file:
+      line = last_line(log_file)
+    if line is None:
+      raise StatusException('empty log')
+    fields = line.split('\t')
+    if len(fields) < 2:
+      raise StatusException('invalid log')
+    try:
+      latency = float(fields[0])
+      timestamp = int(fields[1])
+      return latency, timestamp
+    except ValueError:
+      raise StatusException('invalid log')
+
+  def get_wifilogin(self, max_length=35):
+    # If the wifi-login script is running, include its current status from its log file.
+    # Get the log file it's printing to from its entry in ps aux. Also get its pid.
+    log_path = None
+    pid = None
+    for line in run_command(['ps', 'aux']):
+      fields = line.split()
+      if len(fields) < 12:
+        continue
+      if not (fields[10].startswith('python') and fields[11].endswith('wifi-login2.py')):
+        continue
+      found_log_arg = False
+      for i, arg in enumerate(fields[12:]):
+        if arg == '-l' or arg == '--log':
+          found_log_arg = True
+        elif found_log_arg:
+          log_path = arg
+          break
+      if log_path is not None:
+        pid = fields[1]
+        break
+    if log_path is None or pid is None:
+      return None
+    # Make sure `log_path` is absolute.
+    if not log_path.startswith('/'):
+      # If it's relative, find the process' working directory and prepend with that.
+      wd_link = '/proc/{}/cwd'.format(pid)
+      if os.path.islink(wd_link):
+        working_directory = os.readlink(wd_link)
+        assert working_directory.startswith('/'), working_directory
+        log_path = os.path.join(working_directory, log_path)
+      else:
+        return None
+    with open(log_path) as log_file:
+      line = last_line(log_file)
+    if not line:
+      return None
+    fields = line.split(': ')
+    if not fields:
+      return None
+    level = fields[0]
+    #TODO: Check the last few lines and show the highest level message.
+    if level.lower() not in ('debug', 'info', 'warning', 'error', 'critical'):
+      return None
+    message = ': '.join(fields[1:])
+    return truncate(message, max_length)
+
+
+class StatusException(Exception):
+  def __init__(self, message):
+    self.message = message
+    self.args = (message,)
+
+
+def truncate(string, max_length):
+  if len(string) <= max_length+1:
+    return string
+  else:
+    return string[:max_length]+'…'
+
 
 def read_file(path, max_size=4096):
   try:
@@ -201,14 +332,22 @@ def read_file(path, max_size=4096):
     return None
 
 
-def run_command(command):
+def run_command(command, stream=False):
+  if stream:
+    null_value = []
+  else:
+    null_value = None
   try:
-    output = subprocess.check_output(command, stderr=subprocess.DEVNULL)
+    if stream:
+      process = subprocess.Popen(command, stdout=subprocess.PIPE)
+      return process.stdout
+    else:
+      output = subprocess.check_output(command, stderr=subprocess.DEVNULL)
+      return str(output, 'utf8').rstrip('\r\n')
   except OSError:
-    return None
+    return null_value
   except subprocess.CalledProcessError:
-    return None
-  return str(output, 'utf8').rstrip('\r\n')
+    return null_value
 
 
 def human_time(total_seconds, omit_sec=False):
@@ -253,6 +392,34 @@ def human_time(total_seconds, omit_sec=False):
     elif minutes_str.endswith(':'):
       minutes_str = minutes_str[:-1]
   return days_str+hours_str+minutes_str+seconds_str
+
+
+def tail(file, lines):
+  # Get last `lines` lines of the file. `file` must be an open filehandle.
+  # Returns a list of strings, one per line. If the file is empty, this will return an empty list.
+  # Implementation from https://gist.github.com/amitsaha/5990310#gistcomment-2049292
+  file.seek(0, os.SEEK_END)
+  file_length = position = file.tell()
+  line_count = 0
+  while position >= 0:
+    file.seek(position)
+    next_char = file.read(1)
+    if next_char == '\n' and position != file_length-1:
+      line_count += 1
+    if line_count == lines:
+      break
+    position -= 1
+  if position < 0:
+    file.seek(0)
+  return file.read().splitlines()
+
+
+def last_line(file):
+  lines = tail(file, 1)
+  if lines:
+    return lines[0]
+  else:
+    return None
 
 
 def fail(message):

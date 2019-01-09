@@ -52,31 +52,39 @@ def main(argv):
     else:
       logging.info('Info: Restarting..')
     # Run the process and wait for it to exit (or timeout).
-    reason = 'exited'
-    process = subprocess.Popen(args.command)
-    retval = process.poll()
-    while retval is None:
-      time.sleep(args.pause)
-      if args.timeout:
-        elapsed = time.time() - start
-        if elapsed > args.timeout:
-          reason = 'timeout'
-          logging.info('Info: Process timed out.')
-          break
+    try:
+      reason = 'exited'
+      process = subprocess.Popen(args.command)
       retval = process.poll()
+      while retval is None:
+        time.sleep(args.pause)
+        if args.timeout:
+          elapsed = time.time() - start
+          if elapsed > args.timeout:
+            reason = 'timeout'
+            logging.info('Info: Process timed out.')
+            break
+        retval = process.poll()
+    except KeyboardInterrupt:
+      kill_process(process, args.pause)
+      return
     # If it didn't exit and we decided to kill it, kill it.
     if retval is None:
-      process.terminate()
-      time.sleep(args.pause)
-      if process.poll() is None:
-        process.kill()
-        if process.poll() is None:
-          fail('Error: Process won\'t die!')
+      kill_process(process, args.pause)
     now = time.time()
     # Record stats.
     if args.log:
       args.log.write(format_log_line(args.key, now, start, retval, reason))
     start = now
+
+
+def kill_process(process, pause):
+  process.terminate()
+  time.sleep(pause)
+  if process.poll() is None:
+    process.kill()
+    if process.poll() is None:
+      fail('Error: Process won\'t die!')
 
 
 def format_log_line(key, now, start, retval, reason):

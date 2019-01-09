@@ -14,9 +14,13 @@ def make_argparser():
   parser = argparse.ArgumentParser(description=DESCRIPTION)
   parser.add_argument('command', nargs='+',
     help='Execute this command, and re-execute it whenever it dies.')
+  parser.add_argument('-t', '--timeout', type=int,
+    help='Automatically kill and restart the command after this many seconds.')
   parser.add_argument('-l', '--log', type=argparse.FileType('a'),
-    help='Write stats on the process to this file. Each line is 3 tab-delimited columns: unix time '
-         'the process died, number of seconds it ran, and its exit code.')
+    help='Write stats on the process to this file. Each line is 4 tab-delimited columns: unix time '
+         'the process died, number of seconds it ran, its exit code, and the reason for it dying. '
+         'A reason of "exited" means the process exited on its own. A reason of "timeout" means '
+         'it reached the timeout and was killed by this script.')
   parser.add_argument('-k', '--key',
     help='Output this string as column 4 in the stats log output.')
   parser.add_argument('-p', '--pause', type=float, default=0.2,
@@ -47,18 +51,35 @@ def main(argv):
       logging.info('Info: Launching command..')
     else:
       logging.info('Info: Restarting..')
+    # Run the process and wait for it to exit (or timeout).
+    reason = 'exited'
     process = subprocess.Popen(args.command)
     retval = process.poll()
     while retval is None:
       time.sleep(args.pause)
+      if args.timeout:
+        elapsed = time.time() - start
+        if elapsed > args.timeout:
+          reason = 'timeout'
+          logging.info('Info: Process timed out.')
+          break
       retval = process.poll()
+    # If it didn't exit and we decided to kill it, kill it.
+    if retval is None:
+      process.terminate()
+      time.sleep(args.pause)
+      if process.poll() is None:
+        process.kill()
+        if process.poll() is None:
+          fail('Error: Process won\'t die!')
+    now = time.time()
+    # Record stats.
     if args.log:
-      now = time.time()
-      args.log.write(format_log_line(start, now, retval, args.key))
-      start = now
+      args.log.write(format_log_line(args.key, now, start, retval, reason))
+    start = now
 
 
-def format_log_line(start, now, retval, key):
+def format_log_line(key, now, start, retval, reason):
   elapsed_float = now-start
   elapsed_rounded = round(elapsed_float, 1)
   elapsed_int = int(elapsed_float)
@@ -66,11 +87,15 @@ def format_log_line(start, now, retval, key):
     elapsed = elapsed_int
   else:
     elapsed = elapsed_rounded
-  fields = [int(now), elapsed, retval]
+  fields = [int(now), elapsed, retval, reason]
   if key is not None:
     fields.append(key)
-  logging.info('Info: Process exited in {} with code {}.'
-               .format(human_time(elapsed), retval))
+  if reason is 'exited':
+    logging.info('Info: Process exited in {} with code {}.'
+                 .format(human_time(elapsed), retval))
+  else:
+    logging.info('Info: Process ended in {} for reason {!r}.'
+                 .format(human_time(elapsed), reason))
   return '\t'.join(map(str, fields))+'\n'
 
 

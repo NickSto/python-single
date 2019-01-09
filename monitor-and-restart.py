@@ -19,6 +19,8 @@ def make_argparser():
          'the process died, number of seconds it ran, and its exit code.')
   parser.add_argument('-k', '--key',
     help='Output this string as column 4 in the stats log output.')
+  parser.add_argument('-p', '--pause', type=float, default=0.2,
+    help='Seconds to wait between polling for whether the process is still alive.')
   parser.add_argument('-L', '--error-log', type=argparse.FileType('w'), default=sys.stderr,
     help='Print log messages to this file instead of to stderr. Warning: Will overwrite the file.')
   volume = parser.add_mutually_exclusive_group()
@@ -45,14 +47,18 @@ def main(argv):
       logging.info('Info: Launching command..')
     else:
       logging.info('Info: Restarting..')
-    result = subprocess.run(args.command)
+    process = subprocess.Popen(args.command)
+    retval = process.poll()
+    while retval is None:
+      time.sleep(args.pause)
+      retval = process.poll()
     if args.log:
       now = time.time()
-      args.log.write(format_log_line(start, now, result, args.key))
+      args.log.write(format_log_line(start, now, retval, args.key))
       start = now
 
 
-def format_log_line(start, now, result, key):
+def format_log_line(start, now, retval, key):
   elapsed_float = now-start
   elapsed_rounded = round(elapsed_float, 1)
   elapsed_int = int(elapsed_float)
@@ -60,11 +66,11 @@ def format_log_line(start, now, result, key):
     elapsed = elapsed_int
   else:
     elapsed = elapsed_rounded
-  fields = [int(now), elapsed, result.returncode]
+  fields = [int(now), elapsed, retval]
   if key is not None:
     fields.append(key)
   logging.info('Info: Process exited in {} with code {}.'
-               .format(human_time(elapsed), result.returncode))
+               .format(human_time(elapsed), retval))
   return '\t'.join(map(str, fields))+'\n'
 
 

@@ -29,12 +29,14 @@ def make_argparser():
   return parser
 
 
+#TODO: Detect resuming from sleep and restart the command then.
+
 def main(argv):
 
   parser = make_argparser()
   args = parser.parse_args(argv[1:])
 
-  logging.basicConfig(stream=args.log, level=args.volume, format='%(message)s')
+  logging.basicConfig(stream=args.error_log, level=args.volume, format='%(message)s')
 
   start = time.time()
   now = None
@@ -44,9 +46,9 @@ def main(argv):
     else:
       logging.info('Info: Restarting..')
     result = subprocess.run(args.command)
-    if args.error_log:
+    if args.log:
       now = time.time()
-      args.error_log.write(format_log_line(start, now, result, args.key))
+      args.log.write(format_log_line(start, now, result, args.key))
       start = now
 
 
@@ -54,15 +56,43 @@ def format_log_line(start, now, result, key):
   elapsed_float = now-start
   elapsed_rounded = round(elapsed_float, 1)
   elapsed_int = int(elapsed_float)
-  if elapsed_rounded == elapsed_int:
+  if elapsed_rounded == elapsed_int or elapsed_int >= 100:
     elapsed = elapsed_int
   else:
     elapsed = elapsed_rounded
   fields = [int(now), elapsed, result.returncode]
   if key is not None:
     fields.append(key)
-  logging.info('Info: Process exited in {} seconds with code {}.'.format(elapsed, result.returncode))
+  logging.info('Info: Process exited in {} with code {}.'
+               .format(human_time(elapsed), result.returncode))
   return '\t'.join(map(str, fields))+'\n'
+
+
+def human_time(sec):
+  if sec < 60:
+    return format_time(sec, 'second')
+  elif sec < 60*60:
+    return format_time(sec/60, 'minute')
+  elif sec < 24*60*60:
+    return format_time(sec/60/60, 'hour')
+  elif sec < 10*24*60*60:
+    return format_time(sec/60/60/24, 'day')
+  elif sec < 40*24*60*60:
+    return format_time(sec/60/60/24/7, 'week')
+  elif sec < 365*24*60*60:
+    return format_time(sec/60/60/24/30.5, 'month')
+  else:
+    return format_time(sec/60/60/24/365, 'year')
+
+
+def format_time(quantity, unit):
+  rounded = round(quantity, 1)
+  if rounded == int(quantity):
+    rounded = int(quantity)
+  output = str(rounded)+' '+unit
+  if rounded != 1:
+    output += 's'
+  return output
 
 
 def fail(message):

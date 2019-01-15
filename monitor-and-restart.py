@@ -52,19 +52,9 @@ def main(argv):
     else:
       logging.info('Info: Restarting..')
     # Run the process and wait for it to exit (or timeout).
+    process = subprocess.Popen(args.command)
     try:
-      reason = 'exited'
-      process = subprocess.Popen(args.command)
-      retval = process.poll()
-      while retval is None:
-        time.sleep(args.pause)
-        if args.timeout:
-          elapsed = time.time() - start
-          if elapsed > args.timeout:
-            reason = 'timeout'
-            logging.info('Info: Process timed out.')
-            break
-        retval = process.poll()
+      retval, reason = run_until(process, args.timeout, start, args.pause)
     except KeyboardInterrupt:
       kill_process(process, args.pause)
       return
@@ -76,6 +66,21 @@ def main(argv):
     if args.log:
       args.log.write(format_log_line(args.key, now, start, retval, reason))
     start = now
+
+
+def run_until(process, timeout, start, pause):
+  reason = 'exited'
+  retval = process.poll()
+  while retval is None:
+    time.sleep(pause)
+    if timeout:
+      elapsed = time.time() - start
+      if elapsed > timeout:
+        reason = 'timeout'
+        logging.info('Info: Process timed out.')
+        break
+    retval = process.poll()
+  return retval, reason
 
 
 def kill_process(process, pause):

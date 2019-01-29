@@ -21,19 +21,34 @@ FIELDS.append('wifilogin')
 FIELDS.append('lastping')
 FIELDS.append('pings')
 FIELDS.append('worktime')
-# FIELDS.append('disk')
+FIELDS.append('disk')
 FIELDS.append('temp')
 FIELDS.append('ssid')
-# FIELDS.append('timestamp')
+FIELDS.append('timestamp')
 
-DESCRIPTION = """"""
+FIELDS_META = {
+  'wifilogin': {'priority':70, 'truncate_length':35},
+  'lastping':  {'priority':20, 'max_length':20},
+  'pings':     {'priority':10, 'max_length':10},
+  'worktime':  {'priority':30, 'max_length':16},
+  'disk':      {'priority':60, 'max_length':20},
+  'temp':      {'priority':40, 'max_length':5},
+  'ssid':      {'priority':50, 'truncate_length':10},
+  'timestamp': {'priority':80, 'max_length':10},
+}
+
+DESCRIPTION = """Gather system info and format it for display in GNOME indicator."""
 
 
 def make_argparser():
   parser = argparse.ArgumentParser(description=DESCRIPTION)
   parser.add_argument('fields', nargs='*', default=FIELDS,
     help='The fields to include and their order. Give each as a separate argument. '
+         'Available fields are "'+'", "'.join(FIELDS_META.keys())+'". '
          'Default: '+' '.join(FIELDS))
+  parser.add_argument('-m', '--max-length', default=74,
+    help='The maximum length of the final string. If the final string is longer than this, '
+         'shorten it by truncating or omitting fields. Default: %(default)s')
   parser.add_argument('-l', '--log', type=argparse.FileType('w'), default=sys.stderr,
     help='Print log messages to this file instead of to stderr. Warning: Will overwrite the file.')
   volume = parser.add_mutually_exclusive_group()
@@ -53,7 +68,7 @@ def main(argv):
 
   status = Status(args.fields)
 
-  print(status.get_output_string())
+  print(status.get_output_string(max_length=args.max_length))
 
 
 class Status():
@@ -62,30 +77,53 @@ class Status():
     self.fields = fields
     self.statuses = None
 
-  def get_output_string(self, statuses=None):
+  def get_output_string(self, statuses=None, max_length=None):
+    logging.info('Max length: {}'.format(max_length))
     if statuses is None:
       statuses = self.statuses
     if statuses is None:
       statuses = self.statuses = self.get_statuses()
-    out_strs = []
-    for status in statuses:
-      if status:
-        if status.startswith('[ ') and status.endswith(' ]'):
-          out_strs.append(status)
-        else:
-          out_strs.append('[ '+status+' ]')
-    return ''.join(out_strs)
+    out_str = self.format_output_string(statuses, self.fields)
+    logging.info('Length: {}'.format(len(out_str)))
+    # If it's too long, first try truncating the strings.
+    if max_length is not None and len(out_str) > max_length:
+      logging.info('Too long. Trying to truncate..')
+      out_str = self.format_output_string(statuses, self.fields, truncate=True)
+    # If it's still too long, drop fields until it fits.
+    if max_length is not None and len(out_str) > max_length:
+      logging.info('Still too long. Trying to drop fields..')
+      priorities = sorted(FIELDS_META.keys(), key=lambda field: -FIELDS_META[field]['priority'])
+      fields_left = self.fields
+      for field_to_drop in priorities:
+        logging.info('  Dropping "{}"..'.format(field_to_drop))
+        fields_left.remove(field_to_drop)
+        out_str = self.format_output_string(statuses, fields_left, truncate=True)
+        if len(out_str) < max_length or len(fields_left) == 0:
+          break
+    return out_str
+
+  @staticmethod
+  def format_output_string(statuses, fields, truncate=False):
+    out_str = ''
+    for field in fields:
+      status = statuses.get(field)
+      if status is None:
+        continue
+      status = str(status)
+      if truncate and 'truncate_length' in FIELDS_META[field]:
+        status = truncate_str(status, FIELDS_META[field]['truncate_length'])
+      out_str += '[ '+status+' ]'
+    return out_str
 
   def get_statuses(self, fields=None):
     if fields is None:
       fields = self.fields
-    statuses = []
+    statuses = {}
     for field in fields:
       status = self.get_status(field)
       if status is None:
         logging.info('Info: None status from get_'+field+'()')
-      else:
-        statuses.append(str(status))
+      statuses[field] = status
     return statuses
 
   def get_status(self, field):
@@ -100,7 +138,7 @@ class Status():
   def get_timestamp(self):
     return NOW
 
-  def get_ssid(self, max_length=11):
+  def get_ssid(self):
     cmd_output = run_command(['iwconfig'])
     if cmd_output is None:
       return
@@ -112,7 +150,7 @@ class Status():
     if ssid in IGNORE_SSIDS:
       return None
     else:
-      return truncate(ssid, max_length)
+      return ssid
 
   def get_disk(self):
     cmd_output = run_command(['df', '-h'])
@@ -270,7 +308,7 @@ class Status():
     except ValueError:
       raise StatusException('invalid log')
 
-  def get_wifilogin(self, max_length=35):
+  def get_wifilogin(self):
     # If the wifi-login script is running, include its current status from its log file.
     # Get the log file it's printing to from its entry in ps aux. Also get its pid.
     log_path = None
@@ -315,7 +353,7 @@ class Status():
     if level.lower() not in ('debug', 'info', 'warning', 'error', 'critical'):
       return None
     message = ': '.join(fields[1:])
-    return truncate(message, max_length)
+    return message
 
 
 class StatusException(Exception):
@@ -324,7 +362,7 @@ class StatusException(Exception):
     self.args = (message,)
 
 
-def truncate(string, max_length):
+def truncate_str(string, max_length):
   if string is None:
     return None
   elif len(string) <= max_length+1:

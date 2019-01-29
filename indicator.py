@@ -13,6 +13,7 @@ assert sys.version_info.major >= 3, 'Python 3 required'
 
 DATA_DIR = pathlib.Path('~/.local/share/nbsdata').expanduser()
 NOW = int(time.time())
+IGNORE_SSIDS = ('Just an ordinary toaster.', 'Just a 5GHz toaster.')
 
 # List default fields one-per-line for easy commenting out.
 FIELDS = []
@@ -108,8 +109,8 @@ class Status():
       match = re.search(r'^.*SSID:"(.*)"\s*$', line)
       if match:
         ssid = match.group(1)
-    if ssid is None:
-      return
+    if ssid in IGNORE_SSIDS:
+      return None
     else:
       return truncate(ssid, max_length)
 
@@ -318,7 +319,9 @@ class StatusException(Exception):
 
 
 def truncate(string, max_length):
-  if len(string) <= max_length+1:
+  if string is None:
+    return None
+  elif len(string) <= max_length+1:
     return string
   else:
     return string[:max_length]+'…'

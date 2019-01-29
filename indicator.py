@@ -187,6 +187,10 @@ class Status():
     if ratio is not None:
       if ratio > 10000000000:
         ratio_str = '∞'
+      elif ratio > 100:
+        ratio_str = str(int(ratio))
+      elif ratio > 10:
+        ratio_str = '{:0.1f}'.format(ratio)
       else:
         ratio_str = '{:0.2f}'.format(ratio)
       if output:
@@ -216,8 +220,10 @@ class Status():
     # Check if the last ping was dropped.
     if latency == 0.0:
       latency_str = 'DROP'
+    elif latency < 100:
+      latency_str = '{:0.1f} ms'.format(latency)
     else:
-      latency_str = '{} ms'.format(latency)
+      latency_str = '{} ms'.format(int(latency))
     # How old is the last ping?
     age = NOW - timestamp
     age_str = human_time(age)

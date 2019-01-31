@@ -15,6 +15,16 @@ DATA_DIR = pathlib.Path('~/.local/share/nbsdata').expanduser()
 NOW = int(time.time())
 IGNORE_SSIDS = ('Just an ordinary toaster.', 'Just a 5GHz toaster.')
 
+CHAR_WIDTHS = {'A':9, 'B':8, 'C':8, 'D':8.5, 'E':7, 'F':7, 'G':8.5, 'H':8, 'I':2, 'J':6.5, 'K':8,
+  'L':6.5, 'M':11, 'N':9, 'O':10, 'P':8, 'Q':10, 'R':7.5, 'S':7, 'T':8, 'U':8, 'V':9, 'W':13, 'X':9,
+  'Y':8, 'Z':7.5, 'a':6.5, 'b':6.5, 'c':6.5, 'd':7.5, 'e':7.5, 'f':4.5, 'g':6.5, 'i':1.5, 'j':2.5,
+  'k':6.5, 'l':2.5, 'm':10.5, 'n':6.5, 'o':7.5, 'p':6.5, 'q':7.5, 'r':4.5, 's':5.5, 't':4.5,
+  'u':6.5, 'v':7, 'w':9.5, 'x':6, 'y':7.25, 'z':6.5, '0':7.5, '1':4.5, '2':7.25, '3':6, '4':7.5,
+  '5':6.5, '6':7, '7':7, '8':7, '9':7.5, '!':2, '"':4.5, '#':9, '$':6.5, '%':11, '&':9, "'":1.5,
+  '(':3.5, ')':3.5, '*':6, '+':7, ',':2, '-':3.5, '.':2, '/':6, ':':2, ';':2, '<':7, '=':7, '>':7,
+  '?':5, '@':12, '\\':6.5, '^':8, '_':8, '`':2.5, '|':2, '~':7, '[':2, ']':2, '{':3, '}':3, ' ':2,
+  '•':4.5, '·':2, '°':4, '…':12}
+
 # List default fields one-per-line for easy commenting out.
 FIELDS = []
 FIELDS.append('wifilogin')
@@ -33,11 +43,11 @@ FIELDS_META = {
   'worktime':  {'priority':30, 'max_length':16},
   'disk':      {'priority':60, 'max_length':20},
   'temp':      {'priority':40, 'max_length':5},
-  'ssid':      {'priority':50, 'truncate_length':10},
+  'ssid':      {'priority':50, 'truncate_length':9},
   'timestamp': {'priority':80, 'max_length':10},
 }
 
-DESCRIPTION = """Gather system info and format it for display in GNOME indicator."""
+DESCRIPTION = """Gather system info and format it for display in indicator-sysmonitor."""
 
 
 def make_argparser():
@@ -46,9 +56,9 @@ def make_argparser():
     help='The fields to include and their order. Give each as a separate argument. '
          'Available fields are "'+'", "'.join(FIELDS_META.keys())+'". '
          'Default: '+' '.join(FIELDS))
-  parser.add_argument('-m', '--max-length', default=74,
-    help='The maximum length of the final string. If the final string is longer than this, '
-         'shorten it by truncating or omitting fields. Default: %(default)s')
+  parser.add_argument('-m', '--max-length', default=300,
+    help='The maximum width of the final string, in pixels. If the final string is longer than '
+         'this, shorten it by truncating or omitting fields. Default: %(default)s')
   parser.add_argument('-l', '--log', type=argparse.FileType('w'), default=sys.stderr,
     help='Print log messages to this file instead of to stderr. Warning: Will overwrite the file.')
   volume = parser.add_mutually_exclusive_group()
@@ -84,21 +94,30 @@ class Status():
     if statuses is None:
       statuses = self.statuses = self.get_statuses()
     out_str = self.format_output_string(statuses, self.fields)
-    logging.info('Length: {}'.format(len(out_str)))
+    width = get_display_width(out_str)
+    logging.info('Info: Length: {}'.format(width))
     # If it's too long, first try truncating the strings.
-    if max_length is not None and len(out_str) > max_length:
-      logging.info('Too long. Trying to truncate..')
+    if max_length is not None and width > max_length:
+      logging.info('Info: Too long. Trying to truncate..')
       out_str = self.format_output_string(statuses, self.fields, truncate=True)
+      width = get_display_width(out_str)
+      logging.info('Info: Length: {} after truncation'.format(width))
     # If it's still too long, drop fields until it fits.
-    if max_length is not None and len(out_str) > max_length:
-      logging.info('Still too long. Trying to drop fields..')
+    if max_length is not None and width > max_length:
+      logging.info('Info: Still too long. Trying to drop fields..')
       priorities = sorted(FIELDS_META.keys(), key=lambda field: -FIELDS_META[field]['priority'])
       fields_left = self.fields
       for field_to_drop in priorities:
-        logging.info('  Dropping "{}"..'.format(field_to_drop))
+        logging.info('Info:   Dropping "{}"..'.format(field_to_drop))
         fields_left.remove(field_to_drop)
         out_str = self.format_output_string(statuses, fields_left, truncate=True)
-        if len(out_str) < max_length or len(fields_left) == 0:
+        width = get_display_width(out_str)
+        logging.info('Info: Length: {} after dropping "{}".'.format(width, field_to_drop))
+        if width < max_length:
+          logging.info('Info: Output is now short enough.')
+          break
+        if len(fields_left) == 0:
+          logging.warning('Warning: Failed to shorten output enough.')
           break
     return out_str
 
@@ -467,6 +486,13 @@ def last_line(file):
     return lines[0]
   else:
     return None
+
+
+def get_display_width(string):
+  width = 0
+  for char in string:
+    width += CHAR_WIDTHS.get(char, 7)
+  return width
 
 
 def fail(message):

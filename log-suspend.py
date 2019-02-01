@@ -23,8 +23,8 @@ def make_argparser():
     help='The arguments given to the suspend hook script.')
   parser.add_argument('-p', '--processes', action='append',
     help='Names of processes to notify of power events with signals. The name will be matched '
-         'against the basename of the command or its first argument. SIGUSR1 will be sent on '
-         'suspend, and SIGUSR2 will be sent on resume.')
+         'against the basename of the command or its first argument. SIGPWR will be sent on '
+         'suspend, and SIGCONT will be sent on resume.')
   parser.add_argument('-l', '--log', type=pathlib.Path, default=LOG_PATH,
     help='File to log events to. Default: %(default)s')
   parser.add_argument('-i', '--install', action='store_true',
@@ -60,9 +60,9 @@ def main(argv):
     with args.log.open('a') as log_file:
       log_file.write('{}\t{}\n'.format(time.time(), '\t'.join(args.hook_args)))
     if args.hook_args == ['pre', 'suspend']:
-      signum = signal.SIGUSR1
+      signum = signal.SIGPWR
     elif args.hook_args == ['post', 'suspend']:
-      signum = signal.SIGUSR2
+      signum = signal.SIGCONT
     else:
       signum = None
     messaging.send_signals(args.processes, signum)

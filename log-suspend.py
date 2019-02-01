@@ -13,7 +13,8 @@ assert sys.version_info.major >= 3, 'Python 3 required'
 HOOK_NAME = 'systemd-suspend-hook-glue.sh'
 LOG_PATH = pathlib.Path('~/aa/computer/logs/power.log').expanduser()
 PROC_ROOT = pathlib.Path('/proc')
-DESCRIPTION = """Log """
+DESCRIPTION = """Log power events as notified by systemd. Also, notify processes of the events via
+signals."""
 
 
 def make_argparser():

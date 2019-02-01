@@ -1,10 +1,14 @@
 #!/usr/bin/env python3
 import argparse
 import logging
+import signal
 import subprocess
 import sys
 import time
 assert sys.version_info.major >= 3, 'Python 3 required'
+
+# Incoming IPC signals.
+INBOX = []
 
 DESCRIPTION = """Launch a process, keep it running, and log statistics on its uptime. This is
 basically run-one-constantly, but with stats logging."""
@@ -44,6 +48,9 @@ def main(argv):
 
   logging.basicConfig(stream=args.error_log, level=args.volume, format='%(message)s')
 
+  signal.signal(signal.SIGUSR1, signal_handler)
+  signal.signal(signal.SIGUSR2, signal_handler)
+
   start = time.time()
   now = None
   while True:
@@ -69,6 +76,7 @@ def main(argv):
 
 
 def run_until(process, timeout, start, pause):
+  """Monitor the process and return when it finishes (dies or times out)."""
   reason = 'exited'
   retval = process.poll()
   while retval is None:
@@ -78,7 +86,13 @@ def run_until(process, timeout, start, pause):
       if elapsed > timeout:
         reason = 'timeout'
         logging.info('Info: Process timed out.')
-        break
+    while INBOX:
+      signalnum, timestamp = INBOX.pop(0)
+      if signalnum == signal.SIGUSR2:
+        reason = 'wakeup'
+        logging.info('Info: System resumed from sleep.')
+    if reason in ('timeout', 'wakeup'):
+      break
     retval = process.poll()
   return retval, reason
 
@@ -90,6 +104,11 @@ def kill_process(process, pause):
     process.kill()
     if process.poll() is None:
       fail('Error: Process won\'t die!')
+
+
+def signal_handler(signalnum, frame):
+  """Log receipt of signals for other parts of the script to inspect."""
+  INBOX.append((signalnum, time.time()))
 
 
 def format_log_line(key, now, start, retval, reason):

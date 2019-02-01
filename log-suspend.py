@@ -8,11 +8,11 @@ import subprocess
 import sys
 import tempfile
 import time
+import messaging
 assert sys.version_info.major >= 3, 'Python 3 required'
 
 HOOK_NAME = 'systemd-suspend-hook-glue.sh'
 LOG_PATH = pathlib.Path('~/aa/computer/logs/power.log').expanduser()
-PROC_ROOT = pathlib.Path('/proc')
 DESCRIPTION = """Log power events as notified by systemd. Also, notify processes of the events via
 signals."""
 
@@ -59,52 +59,13 @@ def main(argv):
     logging.info('Writing to log {}'.format(args.log))
     with args.log.open('a') as log_file:
       log_file.write('{}\t{}\n'.format(time.time(), '\t'.join(args.hook_args)))
-    send_signals(args.processes, args.hook_args)
-
-
-def send_signals(process_names, hook_args):
-  if not process_names:
-    return
-  for pid, argv in list_processes():
-    if match_cmdline(argv, process_names):
-      logging.info('Found process {}: {}'.format(pid, ' '.join(argv)))
-      if hook_args == ['pre', 'suspend']:
-        os.kill(pid, signal.SIGUSR1)
-      elif hook_args == ['post', 'suspend']:
-        os.kill(pid, signal.SIGUSR2)
-
-
-def list_processes():
-  """Generate a list of pids and command lines of running processes."""
-  for proc_dir in PROC_ROOT.iterdir():
-    if not (proc_dir.name.isdigit() and proc_dir.is_dir()):
-      continue
-    cmdline_path = proc_dir/'cmdline'
-    if not cmdline_path.is_file():
-      continue
-    try:
-      cmdline_bytes = cmdline_path.open('rb').read()
-    except IOError:
-      # Process ended before we got to read it.
-      continue
-    argv = [str(arg, 'utf8') for arg in cmdline_bytes.split(b'\0')]
-    yield int(proc_dir.name), argv[:-1]
-
-
-def match_cmdline(argv, queries):
-  """Return true if a given command line matches a set of queries.
-  A query matches if it's identical to the basename of the $0 argument (the command) or the $1
-  argument."""
-  if not argv:
-    return False
-  cmd = os.path.basename(argv[0])
-  if cmd in queries:
-    return True
-  elif len(argv) > 1:
-    script = os.path.basename(argv[1])
-    if script in queries:
-      return True
-  return False
+    if args.hook_args == ['pre', 'suspend']:
+      signum = signal.SIGUSR1
+    elif args.hook_args == ['post', 'suspend']:
+      signum = signal.SIGUSR2
+    else:
+      signum = None
+    messaging.send_signals(args.processes, signum)
 
 
 def filter_args(args):

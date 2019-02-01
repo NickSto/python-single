@@ -39,11 +39,6 @@ def make_argparser():
   return parser
 
 
-#TODO: Detect screen unlock events and resume then, too.
-#      Looks like I can detect it via dbus:
-#      $ dbus-monitor --session "type='signal',interface='org.gnome.ScreenSaver'"
-
-
 def main(argv):
 
   parser = make_argparser()
@@ -51,8 +46,8 @@ def main(argv):
 
   logging.basicConfig(stream=args.error_log, level=args.volume, format='%(message)s')
 
-  signal.signal(signal.SIGCONT, signal_handler)
-  signal.signal(signal.SIGPWR, signal_handler)
+  for signum in signal.SIGCONT, signal.SIGPWR, signal.SIGUSR1, signal.SIGUSR2:
+    signal.signal(signum, signal_handler)
 
   start = time.time()
   now = None
@@ -94,7 +89,10 @@ def run_until(process, timeout, start, pause):
       if signalnum == signal.SIGCONT:
         reason = 'wakeup'
         logging.info('Info: System resumed from sleep.')
-    if reason in ('timeout', 'wakeup'):
+      elif signalnum == signal.SIGUSR2:
+        reason = 'unlock'
+        logging.info('Info: Screen unlocked.')
+    if reason in ('timeout', 'wakeup', 'unlock'):
       break
     retval = process.poll()
   return retval, reason

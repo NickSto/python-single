@@ -80,12 +80,17 @@ def main(argv):
 
   status = Status(args.fields)
 
-  try:
-    with STATS_LOG.open('r') as stats_log_file:
-      run_stats = json.load(stats_log_file)
-  except OSError:
-    logging.info('Info: "{}" could not be found or read. Using default data.'.format(STATS_LOG))
-    run_stats = collections.defaultdict(lambda: None)
+  run_stats = collections.defaultdict(lambda: None)
+  if STATS_LOG.is_file() and os.path.getsize(STATS_LOG) > 0:
+    try:
+      with STATS_LOG.open('r') as stats_log_file:
+        run_stats = json.load(stats_log_file)
+    except json.decoder.JSONDecodeError as error:
+      with STATS_LOG.open('r') as stats_log_file:
+        logging.error('Error: Problem loading stats file "{}":\n'
+                      '{}\nFile contents:\n{}'.format(STATS_LOG, error, stats_log_file.read(1024)))
+    except OSError:
+      logging.info('Info: "{}" could not be found or read. Using default data.'.format(STATS_LOG))
 
   fitting_fields = status.get_fitting_fields(max_length=args.max_length)
   stable_fields = status.get_stable_fields(run_stats.get('fitting_fields'),

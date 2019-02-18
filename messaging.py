@@ -11,7 +11,7 @@ def send_signals(process_names, signal):
     return
   for pid, argv in list_processes():
     if match_cmdline(argv, process_names):
-      logging.info('Found process {}: {}'.format(pid, ' '.join(argv)))
+      logging.info('Info: Found process {}: {}'.format(pid, ' '.join(argv)))
       os.kill(pid, signal)
 
 

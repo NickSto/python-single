@@ -70,9 +70,10 @@ def get_dbus_command():
     command.append('--address')
     command.append(bus_address)
   command.append("type='signal',interface='org.gnome.ScreenSaver'")
+  return command
 
 
-def watch_dbus(process, process_names. log_path):
+def watch_dbus(process, process_names, log_path):
   correct_signal = False
   for line_raw in process.stdout:
     fields = line_raw.split()

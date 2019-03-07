@@ -66,11 +66,11 @@ def main(argv):
     try:
       retval, reason = run_until(process, args.timeout, start, args.pause)
     except KeyboardInterrupt:
-      kill_process(process, args.pause)
+      kill_process(process, args.pause, wait=False)
       return
     # If it didn't exit and we decided to kill it, kill it.
     if retval is None:
-      kill_process(process, args.pause)
+      kill_process(process, args.pause, wait=True)
     now = time.time()
     # Record stats.
     if args.log:
@@ -103,13 +103,26 @@ def run_until(process, timeout, start, pause):
   return retval, reason
 
 
-def kill_process(process, pause):
+def kill_process(process, pause, wait=False):
   process.terminate()
-  time.sleep(pause)
-  if process.poll() is None:
+  start = time.time()
+  tries = 0
+  while process.poll() is None:
+    if tries > 0:
+      if wait:
+        now = time.time()
+        logging.warning('Warning: Process won\'t die after {} tries and {:0.1f} seconds.'
+                        .format(tries, now - start))
+      else:
+        fail('Error: Process won\'t die!')
+    process.terminate()
+    time.sleep(pause)
+    if process.poll() is not None:
+      return
     process.kill()
-    if process.poll() is None:
-      fail('Error: Process won\'t die!')
+    time.sleep(pause)
+    pause = pause * 2
+    tries += 1
 
 
 def signal_handler(signalnum, frame):

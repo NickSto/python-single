@@ -33,7 +33,8 @@ def make_argparser():
     help='Print log messages to this file instead of to stderr. Warning: Will overwrite the file.')
   volume = parser.add_mutually_exclusive_group()
   volume.add_argument('-q', '--quiet', dest='volume', action='store_const', const=logging.CRITICAL,
-    default=logging.WARNING)
+    default=logging.WARNING,
+    help='Silence all but the most critical errors. Also silence stderr from the subprocess.')
   volume.add_argument('-v', '--verbose', dest='volume', action='store_const', const=logging.INFO)
   volume.add_argument('-D', '--debug', dest='volume', action='store_const', const=logging.DEBUG)
   return parser
@@ -57,7 +58,11 @@ def main(argv):
     else:
       logging.info('Info: Restarting..')
     # Run the process and wait for it to exit (or timeout).
-    process = subprocess.Popen(args.command)
+    if logging.getLogger().getEffectiveLevel() >= logging.CRITICAL:
+      stderr = subprocess.DEVNULL
+    else:
+      stderr = None
+    process = subprocess.Popen(args.command, stderr=stderr)
     try:
       retval, reason = run_until(process, args.timeout, start, args.pause)
     except KeyboardInterrupt:

@@ -1,17 +1,25 @@
 #!/usr/bin/env python3
 import argparse
 import logging
+import pathlib
 import sys
 assert sys.version_info.major >= 3, 'Python 3 required'
 
+DEFAULT_LOG = pathlib.Path('~/aa/computer/logs/smart-sda.tsv').expanduser()
+CRITICAL_IDS = (5, 187, 188, 197, 198)
 DESCRIPTION = """Read a log of SMART data and print changing values as series, with one column per
 statistic, and one line per timepoint."""
 
 
 def make_argparser():
   parser = argparse.ArgumentParser(description=DESCRIPTION)
-  parser.add_argument('smartlog', nargs='?', type=argparse.FileType('r'), default=sys.stdin,
-    help='Log file output by smart-format.py. Default: stdin.')
+  parser.add_argument('smartlog', nargs='?', type=argparse.FileType('r'), default=DEFAULT_LOG.open(),
+    help='Log file output by smart-format.py. Default: {}.'.format(DEFAULT_LOG))
+  parser.add_argument('-i', '--ids', type=lambda s: [int(i) for i in s.split(',')], default=(),
+    help='Only show these SMART statistics (identified by id number).')
+  parser.add_argument('-c', '--critical', dest='ids', action='store_const', const=CRITICAL_IDS,
+    help='Only show the {} critical SMART statistics identified by Backblaze ({}, and {}).'
+         .format(len(CRITICAL_IDS), ', '.join(map(str, CRITICAL_IDS[:-1])), CRITICAL_IDS[-1]))
   parser.add_argument('-s', '--spaces', type=int, default=2,
     help='Number of spaces between columns. Default: %(default)s.')
   parser.add_argument('-l', '--log', type=argparse.FileType('w'), default=sys.stderr,
@@ -33,7 +41,7 @@ def main(argv):
 
   spacer = ' ' * args.spaces
 
-  data, smartkeys, changed = read_log(args.smartlog)
+  data, smartkeys, changed = read_log(args.smartlog, include=args.ids)
 
   smartids_list = sorted(list(changed))
 
@@ -41,7 +49,7 @@ def main(argv):
   print_data(data, smartids_list, widths, spacer)
 
 
-def read_log(log):
+def read_log(log, include=()):
   smartkeys = {}
   last_values = {}
   changed = set()
@@ -53,6 +61,8 @@ def read_log(log):
     smartid = int(fields[1])
     smartkey = fields[2]
     value = int(fields[3])
+    if include and smartid not in include:
+      continue
     if smartid in last_values and value != last_values[smartid]:
       changed.add(smartid)
     last_values[smartid] = value
@@ -80,8 +90,15 @@ def print_header(smartids_list, smartkeys, spacer):
 
 
 def print_data(data, smartids_list, widths, spacer):
+  above0 = False
   for timepoint in data:
     line = []
+    if not above0:
+      for smartid in smartids_list:
+        if timepoint[smartid] > 0:
+          above0 = True
+    if not above0:
+      continue
     for smartid in smartids_list:
       value = timepoint[smartid]
       width = widths[smartid]

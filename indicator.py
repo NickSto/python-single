@@ -246,6 +246,8 @@ class Status():
         continue
       if mount.startswith('/snap/') or mount == '/boot' or mount.startswith('/boot'):
         continue
+      if filesystem.startswith('/dev/sr'):
+        continue
       frees.append(free)
     if frees:
       return ','.join(frees)

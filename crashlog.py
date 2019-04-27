@@ -12,9 +12,10 @@ assert sys.version_info.major >= 3, 'Python 3 required'
 
 HOME = pathlib.Path('~').expanduser()
 HEXCHARS = set('0123456789abcdef')
-EXCLUDED_TEMPLATE = {'exact':[], 'dirs':[], 'relative_dirs':[]}
+EXCLUDED_TEMPLATE = {'exact':[], 'dirs':[], 'relative_dirs':[], 'exts':[]}
 EXCLUDED_BASIC = EXCLUDED_TEMPLATE.copy()
 EXCLUDED_BASIC['dirs'] = (str(HOME/'.config/google-chrome'), str(HOME/'.local/share/nbsdata'))
+EXCLUDED_BASIC['exts'] = ('pyc',)
 DESCRIPTION = """Parse and filter CrashPlan's backup logs."""
 
 
@@ -25,11 +26,13 @@ def make_argparser():
          '~/src/crashplan/log.')
   parser.add_argument('-p', '--path', action='store_true',
     help='Just print the paths of the changed/deleted files.')
-  parser.add_argument('-d', '--start-date',
+  parser.add_argument('-s', '--start-date',
     help='Only print entries on or after this date. String must match the one in the file exactly.')
-  parser.add_argument('-x', '--exclude', metavar='exclude.yaml', type=argparse.FileType('r'),
+  parser.add_argument('-e', '--end-date',
+    help='Only print entries before this date.')
+  parser.add_argument('-X', '--exclude', metavar='exclude.yaml', type=argparse.FileType('r'),
     help='Exclude paths fitting the filter criteria in this yaml file.')
-  parser.add_argument('-e', '--exclude-basic', action='store_true',
+  parser.add_argument('-x', '--exclude-basic', action='store_true',
     help='Exclude some paths that appear very frequently, instead of providing a full filter list '
          'with --exclude.')
   parser.add_argument('-l', '--error-log', type=argparse.FileType('w'), default=sys.stderr,
@@ -62,8 +65,10 @@ def main(argv):
     started = True
   for line in args.log:
     entry = parse_line(line)
-    if not started and entry['date'] == args.start_date:
+    if not started and args.start_date and entry['date'] == args.start_date:
       started = True
+    if args.end_date and entry['date'] == args.end_date:
+      break
     if (started and
         (entry['hash'] and entry['num2'] is not None) and
         (entry['result'] != 'I' or entry['deleted'] or entry['stats'].get('bytes')) and
@@ -80,21 +85,25 @@ def parse_excluded(excluded_file):
   excluded = EXCLUDED_TEMPLATE.copy()
   excluded_data = yaml.safe_load(excluded_file)
   home = pathlib.Path('~').expanduser()
+  # home_relative
   home_relative = excluded_data.get('home_relative', {})
   for path in home_relative.get('dirs', ()):
     dirpath = path.rstrip('/')+'/'
     excluded['dirs'].append(str(home/dirpath))
   for path in home_relative.get('exact', ()):
     excluded['exact'].append(str(home/path))
+  # absolute
   absolute = excluded_data.get('absolute', {})
   for path in absolute.get('dirs', ()):
     dirpath = path.rstrip('/')+'/'
     excluded['dirs'].append(dirpath)
   for path in absolute.get('exact', ()):
     excluded['exact'].append(path)
+  # relative
   relative = excluded_data.get('relative', {})
   for path in relative.get('dirs', ()):
     excluded['relative_dirs'].append(path)
+  excluded['exts'] = relative.get('exts', ())
   return excluded
 
 
@@ -109,6 +118,10 @@ def exclude_path(path, excluded):
     for dir in path.split(os.sep)[:-1]:
       if dir == relative_dir:
         return True
+  if excluded['exts']:
+    ext = os.path.splitext(path)[1][1:]
+    if ext in excluded['exts']:
+      return True
   return False
 
 

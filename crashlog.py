@@ -28,8 +28,12 @@ def make_argparser():
     help='Just print the paths of the changed/deleted files.')
   parser.add_argument('-s', '--start-date',
     help='Only print entries on or after this date. String must match the one in the file exactly.')
+  parser.add_argument('-S', '--start-time',
+    help='Same as --start-date, but for time.')
   parser.add_argument('-e', '--end-date',
     help='Only print entries before this date.')
+  parser.add_argument('-E', '--end-time',
+    help='Same as --end-date, but for time.')
   parser.add_argument('-X', '--exclude', metavar='exclude.yaml', type=argparse.FileType('r'),
     help='Exclude paths fitting the filter criteria in this yaml file.')
   parser.add_argument('-x', '--exclude-basic', action='store_true',
@@ -59,15 +63,16 @@ def main(argv):
   else:
     excluded = EXCLUDED_TEMPLATE.copy()
 
-  if args.start_date:
+  if args.start_date or args.start_time:
     started = False
   else:
     started = True
   for line in args.log:
     entry = parse_line(line)
-    if not started and args.start_date and entry['date'] == args.start_date:
+    if not started and time_matches(entry['date'], entry['time'], args.start_date, args.start_time):
       started = True
-    if args.end_date and entry['date'] == args.end_date:
+    if started and (args.end_date or args.end_time) and time_matches(entry['date'], entry['time'],
+                                                                     args.end_date, args.end_time):
       break
     if (started and
         (entry['hash'] and entry['num2'] is not None) and
@@ -76,7 +81,13 @@ def main(argv):
       if args.path:
         print(entry['path'])
       else:
-        print('{date} {time}: {path}'.format(**entry))
+        if entry['deleted']:
+          change = 'D'
+        elif entry['stats'].get('changed'):
+          change = 'M'
+        else:
+          change = '?'
+        print('{date} {time}: {} {path}'.format(change, **entry))
 
 
 def parse_excluded(excluded_file):
@@ -170,6 +181,17 @@ def parse_line(line):
     paren = None
   return {'result':fields[0], 'date':fields[1], 'time':fields[2], 'num1':num1, 'hash':digest,
           'num2':num2, 'path':path, 'stats':stats, 'size':size, 'deleted':deleted}
+
+
+def time_matches(entry_date, entry_time, start_date, start_time):
+  if start_date and start_time:
+    return start_date == entry_date and start_time == entry_time
+  elif start_date:
+    return start_date == entry_date
+  elif start_time:
+    return start_time == entry_time
+  else:
+    return None
 
 
 def fail(message):

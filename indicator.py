@@ -58,7 +58,7 @@ def make_argparser():
     help='The fields to include and their order. Give each as a separate argument. '
          'Available fields are "'+'", "'.join(FIELDS_META.keys())+'". '
          'Default: '+' '.join(FIELDS))
-  parser.add_argument('-m', '--max-length', default=290,
+  parser.add_argument('-m', '--max-length', type=int, default=250,
     help='The maximum width of the final string, in pixels. If the final string is longer than '
          'this, shorten it by truncating or omitting fields. Default: %(default)s')
   parser.add_argument('-l', '--log', type=argparse.FileType('w'), default=sys.stderr,

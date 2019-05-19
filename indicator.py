@@ -17,15 +17,15 @@ STATS_LOG = DATA_DIR / 'indicator.json'
 NOW = int(time.time())
 IGNORE_SSIDS = ('Just an ordinary toaster.', 'Just a 5GHz toaster.')
 
-CHAR_WIDTHS = {'A':9, 'B':8, 'C':8, 'D':8.5, 'E':7, 'F':7, 'G':8.5, 'H':8, 'I':2, 'J':6.5, 'K':8,
-  'L':6.5, 'M':11, 'N':9, 'O':10, 'P':8, 'Q':10, 'R':7.5, 'S':7, 'T':8, 'U':8, 'V':9, 'W':13, 'X':9,
-  'Y':8, 'Z':7.5, 'a':6.5, 'b':6.5, 'c':6.5, 'd':7.5, 'e':7.5, 'f':4.5, 'g':6.5, 'i':1.5, 'j':2.5,
-  'k':6.5, 'l':2.5, 'm':10.5, 'n':6.5, 'o':7.5, 'p':6.5, 'q':7.5, 'r':4.5, 's':5.5, 't':4.5,
-  'u':6.5, 'v':7, 'w':9.5, 'x':6, 'y':7.25, 'z':6.5, '0':7.5, '1':4.5, '2':7.25, '3':6, '4':7.5,
-  '5':6.5, '6':7, '7':7, '8':7, '9':7.5, '!':2, '"':4.5, '#':9, '$':6.5, '%':11, '&':9, "'":1.5,
-  '(':3.5, ')':3.5, '*':6, '+':7, ',':2, '-':3.5, '.':2, '/':6, ':':2, ';':2, '<':7, '=':7, '>':7,
-  '?':5, '@':12, '\\':6.5, '^':8, '_':8, '`':2.5, '|':2, '~':7, '[':2, ']':2, '{':3, '}':3, ' ':2,
-  '•':4.5, '·':2, '°':4, '…':12}
+CHAR_WIDTHS = {'A':36, 'B':32, 'C':32, 'D':34, 'E':28, 'F':28, 'G':34, 'H':32, 'I':8, 'J':26,
+  'K':32, 'L':26, 'M':44, 'N':36, 'O':40, 'P':32, 'Q':40, 'R':30, 'S':28, 'T':32, 'U':32, 'V':36,
+  'W':52, 'X':36, 'Y':32, 'Z':30, 'a':26, 'b':26, 'c':26, 'd':30, 'e':30, 'f':18, 'g':26, 'i':6,
+  'j':10, 'k':26, 'l':10, 'm':42, 'n':26, 'o':30, 'p':26, 'q':30, 'r':18, 's':22, 't':18, 'u':26,
+  'v':28, 'w':38, 'x':24, 'y':29, 'z':26, '0':30, '1':18, '2':29, '3':24, '4':30, '5':26, '6':28,
+  '7':28, '8':28, '9':30, ' ':8, '!':8, '"':18, '#':36, '$':26, '%':44, '&':36, "'":6, '(':14,
+  ')':14, '*':24, '+':28, ',':8, '-':14, '.':8, '/':24, ':':8, ';':8, '<':28, '=':28, '>':28,
+  '?':20, '@':48, '[':8, '\\':26, ']':8, '^':32, '_':32, '`':10, '{':12, '|':8, '}':12, '~':28,
+  '°':16, '·':8, '•':18, '…':48}
 
 # List default fields one-per-line for easy commenting out.
 FIELDS = []
@@ -58,7 +58,7 @@ def make_argparser():
     help='The fields to include and their order. Give each as a separate argument. '
          'Available fields are "'+'", "'.join(FIELDS_META.keys())+'". '
          'Default: '+' '.join(FIELDS))
-  parser.add_argument('-m', '--max-length', type=int, default=250,
+  parser.add_argument('-m', '--max-length', type=int, default=1000,
     help='The maximum width of the final string, in pixels. If the final string is longer than '
          'this, shorten it by truncating or omitting fields. Default: %(default)s')
   parser.add_argument('-l', '--log', type=argparse.FileType('w'), default=sys.stderr,

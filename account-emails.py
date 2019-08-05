@@ -14,7 +14,6 @@ except ImportError:
   console = None
 
 DEFAULT_TERMWIDTH = 80
-ARG_DEFAULTS = {'email':'nmapsy', 'accounts_path':'~/annex/Info/reference, notes/accounts.txt'}
 USAGE = "%(prog)s [options]"
 DESCRIPTION = """Go through my accounts and find all the dot-variations of my spam email address
 I've used."""
@@ -23,16 +22,22 @@ I've used."""
 def main(argv):
 
   parser = argparse.ArgumentParser(description=DESCRIPTION)
-  parser.set_defaults(**ARG_DEFAULTS)
 
   parser.add_argument('accounts_path', metavar='accounts.txt', nargs='?', type=os.path.expanduser,
+    default='~/annex/Info/reference, notes/accounts.txt',
     help='The accounts text file. Default: %(default)s.')
-  parser.add_argument('-e', '--email',
+  parser.add_argument('-e', '--email', default='nmapsy',
     help='The email address to look for. Default: %(default)s')
   parser.add_argument('-c', '--choose', action='store_true',
     help='Just choose an unused email, or if all are used, the least-often used one.')
   parser.add_argument('-t', '--tabs', action='store_true',
     help='Print tab-delimited lines with no colons (computer-readable).')
+  parser.add_argument('-D', '--no-collapse-dots', dest='collapse_dots', action='store_false',
+    default=True,
+    help='Print addresses that differ by number of consecutive dots as distinct addresses.')
+  parser.add_argument('--max-output', type=int, default=256,
+    help='If the number of dot combinations is greater than this, fail instead of flooding the '
+      'terminal. Default: %(default)s')
 
   args = parser.parse_args(argv[1:])
 
@@ -47,6 +52,9 @@ def main(argv):
   basenames = collections.defaultdict(lambda: 0)
   # How many places are there for dots in-between characters in the email?
   places = len(args.email)-1
+  if 2**places > args.max_output:
+    fail('Error: Length of email {!r} would give more than --max-output combinations ({} > {})'
+         .format(args.email, 2**places, args.max_output))
   # Make a format string like '{:05b}' that will print a binary sequence of 1's and 0's as wide as
   # the number of places.
   format_str = '{:0'+str(places)+'b}'
@@ -75,6 +83,8 @@ def main(argv):
                 username = value.value.split('@')[0]
                 basename = username.split('+')[0]
                 if basename.replace('.', '') == args.email:
+                  if args.collapse_dots:
+                    basename = collapse_dots(basename)
                   basenames[basename] += 1
                   entries[basename].append(entry.name)
 
@@ -102,6 +112,15 @@ def main(argv):
       print_email(basename, basenames[basename], entries[basename], args.tabs, termwidth)
   if args.choose:
     print_email(least_used, uses_min, entries[least_used], args.tabs, termwidth)
+
+
+def collapse_dots(dotted_str):
+  collapsed_str = dotted_str
+  last_str = None
+  while collapsed_str != last_str:
+    last_str = collapsed_str
+    collapsed_str = collapsed_str.replace('..', '.')
+  return collapsed_str
 
 
 def print_email(email, uses, entries, tabs=False, width=80):

@@ -43,9 +43,9 @@ FIELDS_META = {
   'lastping':  {'priority':20, 'max_length':20},
   'pings':     {'priority':10, 'max_length':10},
   'worktime':  {'priority':30, 'max_length':16},
-  'disk':      {'priority':60, 'max_length':20},
-  'temp':      {'priority':40, 'max_length':5},
-  'ssid':      {'priority':50, 'truncate_length':9},
+  'disk':      {'priority':50, 'max_length':20},
+  'temp':      {'priority':60, 'max_length':5},
+  'ssid':      {'priority':40, 'truncate_length':9},
   'timestamp': {'priority':80, 'max_length':10},
 }
 
@@ -58,7 +58,7 @@ def make_argparser():
     help='The fields to include and their order. Give each as a separate argument. '
          'Available fields are "'+'", "'.join(FIELDS_META.keys())+'". '
          'Default: '+' '.join(FIELDS))
-  parser.add_argument('-m', '--max-length', type=int, default=1000,
+  parser.add_argument('-m', '--max-length', type=int, default=1100,
     help='The maximum width of the final string, in pixels. If the final string is longer than '
          'this, shorten it by truncating or omitting fields. Default: %(default)s')
   parser.add_argument('-l', '--log', type=argparse.FileType('w'), default=sys.stderr,
@@ -299,24 +299,31 @@ class Status():
         summary = json.load(file)
     except (OSError, json.decoder.JSONDecodeError):
       pass
-    ratio = None
+    pct = None
     if summary is not None and 'ratios' in summary:
-      for ratio_obj in summary['ratios']:
-        if ratio_obj.get('timespan') == 43200:
-          ratio = ratio_obj.get('value')
-    if ratio is not None:
-      if ratio > 10000000000:
-        ratio_str = '∞'
-      elif ratio > 100:
-        ratio_str = str(int(ratio))
-      elif ratio > 10:
-        ratio_str = '{:0.1f}'.format(ratio)
+      for ratio in summary['ratios']:
+        if ratio.get('timespan') == 43200:
+          totals = ratio.get('totals')
+          if totals:
+            p_time = totals.get('p', 0)
+            w_time = totals.get('w', 0)
+            pw_time = p_time + w_time
+            if pw_time > 0:
+              pct = 100 * w_time / pw_time
+          break
+    if pct is not None:
+      if pct == 0:
+        pct_str = '0%'
+      elif pct < 0.2:
+        pct_str = f'{pct:0.2f}%'
+      elif pct < 2:
+        pct_str = f'{pct:0.1f}%'
       else:
-        ratio_str = '{:0.2f}'.format(ratio)
+        pct_str = f'{int(pct)}%'
       if output:
-        output = '{} · {}'.format(output, ratio_str)
+        output = f'{output} · {pct_str}'
       else:
-        output = ratio_str
+        output = pct_str
     return output
 
   def get_pings(self):

@@ -189,7 +189,7 @@ class Status():
     out_str = ''
     for field in fields:
       status = self.statuses.get(field)
-      if status is None:
+      if status is None or status == '':
         continue
       status = str(status)
       if truncate and 'truncate_length' in FIELDS_META[field]:
@@ -202,7 +202,9 @@ class Status():
     for field in self.fields:
       status = self.get_status(field)
       if status is None:
-        logging.info('Info: None status from get_'+field+'()')
+        logging.info(f'Info: None status from get_{field}()')
+      elif status == '':
+        logging.info(f"Info: Empty string '' from get_{field}()")
       statuses[field] = status
     return statuses
 

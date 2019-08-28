@@ -133,7 +133,7 @@ def site_is_supported(url):
 
 
 def format_command(cmd):
-  escaped_args = cmd
+  escaped_args = [None]*len(cmd)
   for i, arg in enumerate(cmd):
     escaped_args[i] = arg
     for char in ' ?&;\'":$':
@@ -161,12 +161,12 @@ class Formatter:
     uploader_id = get_format_value(self.url, 'uploader_id')
     # Only use both uploader and uploader_id if the id is a channel id like "UCZ5C1HBPMEcCA1YGQmqj6Iw"
     if re.search(r'^UC[a-zA-Z0-9_-]{22}$', uploader_id):
+      return '[src %(uploader)s, %(uploader_id)s] [posted %(upload_date)s] [id %(id)s].%(ext)s'
+    else:
       logging.warning(
         f'uploader_id {uploader_id} looks like a username, not a channel id. Omitting channel id..'
       )
       return '[src %(uploader_id)s] [posted %(upload_date)s] [id %(id)s].%(ext)s'
-    else:
-      return '[src %(uploader)s, %(uploader_id)s] [posted %(upload_date)s] [id %(id)s].%(ext)s'
 
   def format_vimeo(self):
     return '[src vimeo.com%%2F%(uploader_id)s] [posted %(upload_date)s] [id %(id)s].%(ext)s'

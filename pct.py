@@ -1,27 +1,21 @@
-#!/usr/bin/env python
-from __future__ import division
-from __future__ import print_function
-import sys
-import urllib
+#!/usr/bin/env python3
 import argparse
+import sys
+import urllib.parse
 
 
-OPT_DEFAULTS = {'preserve':''}
 USAGE = "%(prog)s [options]"
 DESCRIPTION = """Percent-encode and decode strings (like in a URL).
-This is a thin wrapper around urllib.quote() and urllib.unquote()."""
-EPILOG = """WARNING: This currently cannot handle Unicode."""
+This is a thin wrapper around urllib.parse.quote() and urllib.parse.unquote()."""
 
 def main(argv):
 
-  parser = argparse.ArgumentParser(description=DESCRIPTION, epilog=EPILOG)
-  parser.set_defaults(**OPT_DEFAULTS)
-
+  parser = argparse.ArgumentParser(description=DESCRIPTION)
   parser.add_argument('operation', choices=('encode', 'decode'),
     help='Whether to "encode" or "decode".')
   parser.add_argument('string', nargs='?',
     help='The string to encode or decode. Omit to read from stdin.')
-  parser.add_argument('-p', '--preserve',
+  parser.add_argument('-p', '--preserve', default='',
     help='Preserve these characters instead of encoding them. This is in addition to the default '
          'preserved characters (letters, numbers, "_", ".", and "-").')
 
@@ -34,10 +28,10 @@ def main(argv):
 
   if args.operation == 'encode':
     for line in lines:
-      sys.stdout.write(urllib.quote(line, safe=args.preserve))
+      print(urllib.parse.quote(line, safe=args.preserve), end='')
   elif args.operation == 'decode':
     for line in lines:
-      sys.stdout.write(urllib.unquote(line))
+      print(urllib.parse.unquote(line), end='')
   else:
     raise AssertionError('Operation must be "encode" or "decode".')
   print()

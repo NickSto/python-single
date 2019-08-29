@@ -202,7 +202,7 @@ class Formatter:
     return self._format_instatwit()
 
   def _format_instatwit(self):
-    upload_date = get_format_value(self.url)
+    upload_date = get_format_value(self.url, 'upload_date')
     if upload_date == 'NA':
       logging.warning(
         'No upload date could be obtained! You might want to put it in yourself:\n'

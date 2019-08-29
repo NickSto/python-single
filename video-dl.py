@@ -228,7 +228,8 @@ class Formatter:
 def get_format_value(url, key):
   cmd = ('youtube-dl', '--get-filename', '-o', f'%({key})s', url)
   result = subprocess.run(cmd, stdout=subprocess.PIPE)
-  return str(result.stdout, 'utf8')
+  output = str(result.stdout, 'utf8')
+  return output.rstrip('\r\n')
 
 
 def double_escape_url(url):

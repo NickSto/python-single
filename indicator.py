@@ -15,7 +15,7 @@ assert sys.version_info.major >= 3, 'Python 3 required'
 DATA_DIR = pathlib.Path('~/.local/share/nbsdata').expanduser()
 STATS_LOG = DATA_DIR / 'indicator.json'
 NOW = int(time.time())
-IGNORE_SSIDS = ('Just an ordinary toaster.', 'Just a 5GHz toaster.')
+IGNORE_SSIDS = ('Carl Weathers',)
 
 CHAR_WIDTHS = {'A':36, 'B':32, 'C':32, 'D':34, 'E':28, 'F':28, 'G':34, 'H':32, 'I':8, 'J':26,
   'K':32, 'L':26, 'M':44, 'N':36, 'O':40, 'P':32, 'Q':40, 'R':30, 'S':28, 'T':32, 'U':32, 'V':36,

@@ -11,6 +11,7 @@ assert sys.version_info.major >= 3, 'Python 3 required'
 
 DESCRIPTION = """Download and label a video using youtube-dl."""
 YOUTUBE_DL_ARGS = ['--no-mtime', '--add-metadata', '--xattrs']
+VALID_CONVERSIONS = ['mp3', 'm4a', 'flac', 'aac', 'wav']
 SUPPORTED_SITES = {
   'youtube': {
     'domain':'youtube.com',
@@ -63,9 +64,15 @@ def make_argparser():
   parser.add_argument('-f', '--quality',
     help='Video quality to request. Only works for {}.'.format([', '.join(QUALITY_SITES)]))
   parser.add_argument('-n', '--get-filename', action='store_true')
-  #TODO: parser.add_argument('-c', '--convert-to')
-  #TODO: parser.add_argument('-p', '--posted')
-  #      Or just interactively ask for the date.
+  parser.add_argument('-c', '--convert-to', choices=VALID_CONVERSIONS,
+    help='Give a file extension to convert the video to this audio format. The file will be named '
+      '"{title}.{ext}".')
+  parser.add_argument('-p', '--posted',
+    help='The string to insert into the [posted YYYYMMDD] field, if none can be automatically '
+      'determined.')
+  parser.add_argument('-I', '--non-interactive', dest='interactive', default=True,
+    action='store_const', const=False,
+    help='Do not prompt the user for input. Proceed fully automatically.')
   parser.add_argument('-l', '--log', type=argparse.FileType('w'), default=sys.stderr,
     help='Print log messages to this file instead of to stderr. Warning: Will overwrite the file.')
   volume = parser.add_mutually_exclusive_group()
@@ -104,12 +111,17 @@ def main(argv):
       fail('Error: --quality only works with '+[', '.join(QUALITY_SITES)])
     qual_key = qualities.get(args.quality, args.quality)
 
-  formatter = Formatter(site, args.url, args.title)
+  formatter = Formatter(
+    site, args.url, title=args.title, convert=args.convert_to, interactive=args.interactive,
+    posted=args.posted,
+  )
   fmt_str = formatter.get_format_string()
 
   end_args = ['-o', fmt_str, args.url]
   if args.quality:
     end_args = ['-f', qual_key] + end_args
+  if args.convert_to:
+    end_args = ['--extract-audio', '--audio-format', args.convert_to] + end_args
 
   if args.get_filename:
     cmd = ['youtube-dl', '--get-filename'] + end_args
@@ -145,17 +157,23 @@ def format_command(cmd):
 
 class Formatter:
 
-  def __init__(self, site, url, title=None):
+  def __init__(self, site, url, title=None, convert=False, interactive=True, posted=None):
     self.site = site
     self.url = url
+    self.convert = convert
+    self.interactive = interactive
+    self.posted = posted
     if title is None:
       self.title = '%(title)s'
     else:
       self.title = title
 
   def get_format_string(self):
-    metaformatter = getattr(self, 'format_{name}'.format(**self.site))
-    return self.title+' '+metaformatter()
+    if self.convert:
+      return self.title+'.%(ext)s'
+    else:
+      metaformatter = getattr(self, 'format_{name}'.format(**self.site))
+      return self.title+' '+metaformatter()
 
   def format_youtube(self):
     uploader_id = get_format_value(self.url, 'uploader_id')
@@ -204,13 +222,12 @@ class Formatter:
   def _format_instatwit(self):
     upload_date = get_format_value(self.url, 'upload_date')
     if upload_date == 'NA':
-      logging.warning(
-        'No upload date could be obtained! You might want to put it in yourself:\n'
-        '[posted YYYYMMDD]'
-      )
-      posted_fmt=''
+      if self.posted:
+        posted_fmt = f'[posted {self.posted}] '
+      else:
+        posted_fmt = get_posted_str(self.interactive)
     else:
-      posted_fmt='[posted %(upload_date)s] '
+      posted_fmt = '[posted %(upload_date)s] '
     domain = self.site['domain']
     return posted_fmt+f'[src {domain}%%2F%(uploader_id)s] [id %(id)s].%(ext)s'
 
@@ -223,6 +240,23 @@ class Formatter:
     assert parts.netloc.endswith(self.site['domain']), url
     simple_url = self.site['domain']+parts.path
     return double_escape_url(simple_url)
+
+
+def get_posted_str(interactive):
+  posted_fmt = ''
+  logging.warning('Warning: No upload date could be obtained!')
+  if interactive:
+    logging.warning(
+      'Please enter a string to use in the [posted YYYYMMDD] field. Or just hit enter to skip.'
+    )
+    posted_str = input('Posted: ')
+    if 1 < len(posted_str) < 30:
+      posted_fmt = f'[posted {posted_str}] '
+    else:
+      logging.warning(
+        f'Warning: Did not receive a valid string (saw {posted_str!r}). Skipping..'
+      )
+  return posted_fmt
 
 
 def get_format_value(url, key):

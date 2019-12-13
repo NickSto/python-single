@@ -15,7 +15,7 @@ assert sys.version_info.major >= 3, 'Python 3 required'
 DATA_DIR = pathlib.Path('~/.local/share/nbsdata').expanduser()
 STATS_LOG = DATA_DIR / 'indicator.json'
 NOW = int(time.time())
-IGNORE_SSIDS = ('Carl Weathers',)
+IGNORE_SSIDS = ('two calculators in a trench coat',)
 
 CHAR_WIDTHS = {'A':36, 'B':32, 'C':32, 'D':34, 'E':28, 'F':28, 'G':34, 'H':32, 'I':8, 'J':26,
   'K':32, 'L':26, 'M':44, 'N':36, 'O':40, 'P':32, 'Q':40, 'R':30, 'S':28, 'T':32, 'U':32, 'V':36,
@@ -315,13 +315,13 @@ class Status():
           break
     if pct is not None:
       if pct == 0:
-        pct_str = '0%'
+        pct_str = '0% w'
       elif pct < 0.2:
-        pct_str = f'{pct:0.2f}%'
+        pct_str = f'{pct:0.2f}% w'
       elif pct < 2:
-        pct_str = f'{pct:0.1f}%'
+        pct_str = f'{pct:0.1f}% w'
       else:
-        pct_str = f'{int(pct)}%'
+        pct_str = f'{int(pct)}% w'
       if output:
         output = f'{output} · {pct_str}'
       else:

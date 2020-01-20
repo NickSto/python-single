@@ -35,8 +35,8 @@ def make_argparser():
     help='The extension of the file. You can use this to make sure the names of the archive files '
          'are like "example-2017-03-23-121700.tar.gz" instead of '
          '"example.tar-2017-03-23-121700.gz".')
-  parser.add_argument('-c', '--copies', default=2,
-    help='How many copies to keep per time period.')
+  parser.add_argument('-c', '--copies', type=int, default=2,
+    help='How many copies to keep per time period. Default: %(default)s')
   parser.add_argument('-m', '--min-size', type=int,
     help='Minimum file size (in bytes). If the target file is smaller than this, do not copy it '
          'into the archive.')
@@ -233,7 +233,7 @@ def get_plan(tracker_section, destination, required_copies, periods=PERIODS, now
         candidates.sort(key=lambda archive: archive['timestamp'])
         copies.append(candidates[0].copy())
       else:
-        logging.info('No existing archive can serve as {} copy {}.'.format(period, i+1))
+        logging.debug('No existing archive can serve as {} copy {}.'.format(period, i+1))
         if i+1 == 1:
           # Add it to the wanted list if it's copy 1.
           # If it's not copy 1, then making a new backup and calling it copy 2, for example, would

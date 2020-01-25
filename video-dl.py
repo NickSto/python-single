@@ -62,7 +62,8 @@ def make_argparser():
   parser.add_argument('-F', '--formats', action='store_true',
     help='Just print the available video quality options.')
   parser.add_argument('-f', '--quality',
-    help='Video quality to request. Only works for {}.'.format([', '.join(QUALITY_SITES)]))
+    help='Video quality to request. Shorthands are available for {}. Anything else will be passed '
+      'on literally to youtube-dl.'.format(', '.join(QUALITY_SITES)))
   parser.add_argument('-n', '--get-filename', action='store_true')
   parser.add_argument('-c', '--convert-to', choices=VALID_CONVERSIONS,
     help='Give a file extension to convert the video to this audio format. The file will be named '
@@ -106,10 +107,13 @@ def main(argv):
 
   qual_key = None
   if args.quality:
-    qualities = site.get('qualities')
-    if not qualities:
-      fail('Error: --quality only works with '+[', '.join(QUALITY_SITES)])
-    qual_key = qualities.get(args.quality, args.quality)
+    qualities = site.get('qualities', {})
+    qual_key = qualities.get(args.quality)
+    if qual_key is None:
+      logging.warning(
+        f'Warning: --quality {args.quality} unrecognized. Passing verbatim to youtube-dl.'
+      )
+      qual_key = args.quality
 
   formatter = Formatter(
     site, args.url, title=args.title, convert=args.convert_to, interactive=args.interactive,

@@ -5,6 +5,7 @@ import datetime
 import logging
 import pathlib
 import sys
+import yaml
 assert sys.version_info.major >= 3, 'Python 3 required'
 
 PERIODS = collections.OrderedDict(
@@ -19,12 +20,17 @@ PERIODS = collections.OrderedDict(
 
 DESCRIPTION = """Take actions based on the content of a simple input file."""
 
-#TODO: Add path whitelist.
+
 def make_argparser():
   parser = argparse.ArgumentParser(add_help=False, description=DESCRIPTION)
   options = parser.add_argument_group('Options')
   options.add_argument('infile', type=argparse.FileType('r'), default=sys.stdin, nargs='?',
     help='Input file. Omit to read from stdin.')
+  options.add_argument('-c', '--config', type=argparse.FileType('r'),
+    help='Config file for parameters and options.')
+  options.add_argument('-w', '--whitelist', type=pathlib.Path, action='append', default=[],
+    help='Allow accessing files under this directory. Can give multiple directories by giving this '
+      'option multiple times.')
   options.add_argument('-p', '--precision', type=int,
     help='Time precision of execution. How many minutes since the last time this was executed? '
       'Required for any command with a #?when parameter. Currently only applied to the #?when hour '
@@ -49,17 +55,40 @@ def main(argv):
 
   logging.basicConfig(stream=args.log, level=args.volume, format='%(message)s')
 
+  static_params = {'whitelist':[]}
+  if args.config:
+    read_config(args.config, static_params)
+  for path in args.whitelist:
+    static_params['whitelist'].append(path.resolve())
+
   for lines in chunk_input(args.infile):
+    # Parse the chunk.
     try:
       command, chunk_args, params, content = parse_chunk(lines)
     except ValueError as error:
       logging.error(error)
       continue
+    # Include static params, but allow them to be overridden by ones from the current chunk.
+    for key, value in static_params.items():
+      if key not in params:
+        params[key] = value
+    # Postpone commands according to 'when' parameter.
     if 'when' in params:
       if not execute_now(params['when'], args.precision):
         continue
+    # Execute the command.
     fxn = COMMANDS[command]
-    fxn(chunk_args, content)
+    fxn(chunk_args, content, params)
+
+
+def read_config(config_file, params):
+  data = yaml.safe_load(config_file)
+  if 'whitelist' in data:
+    for path_str in data['whitelist']:
+      path = pathlib.Path(path_str).expanduser()
+      if not path.is_absolute():
+        logging.error(f'Error: Config file whitelist path not absolute: {str(path)!r}')
+      params['whitelist'].append(path)
 
 
 def chunk_input(lines):
@@ -169,12 +198,16 @@ def execute_now(time_spec, precision):
     return True
 
 
-def do_echo(args, content):
+def do_echo(args, content, params):
   print(*args)
 
 
-def do_cat(args, content):
+def do_cat(args, content, params):
+  whitelist = params.get('whitelist', ())
   for path in [pathlib.Path(arg) for arg in args]:
+    if not in_whitelist(path, whitelist):
+      logging.error(f'Error: Path not in whitelist: {str(path)!r}')
+      continue
     if not path.parent.is_dir():
       logging.error(f'Error: Directory containing {str(path)!r} not found.')
       continue
@@ -190,6 +223,13 @@ COMMANDS = {
   'echo':do_echo,
   'cat':do_cat,
 }
+
+
+def in_whitelist(path, whitelist):
+  for directory in whitelist:
+    if str(path).startswith(f'{directory}/'):
+      return True
+  return False
 
 
 def fail(message):

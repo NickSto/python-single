@@ -72,6 +72,9 @@ def main(argv):
     for key, value in static_params.items():
       if key not in params:
         params[key] = value
+    # Allow deactivating commands easily.
+    if 'pass' in params:
+      continue
     # Postpone commands according to 'when' parameter.
     if 'when' in params:
       if not execute_now(params['when'], args.precision):
@@ -137,6 +140,8 @@ def parse_params(params_line):
   param_args = fields[1:]
   if param_type == 'when':
     return 'when', parse_when_param(param_args)
+  if param_type == 'pass':
+    return 'pass', True
   else:
     raise ValueError(f'Invalid parameter type {param_type!r}')
 

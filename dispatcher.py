@@ -204,7 +204,8 @@ def do_echo(args, content, params):
 
 def do_cat(args, content, params):
   whitelist = params.get('whitelist', ())
-  for path in [pathlib.Path(arg) for arg in args]:
+  for path_str in args:
+    path = pathlib.Path(path_str).resolve()
     if not in_whitelist(path, whitelist):
       logging.error(f'Error: Path not in whitelist: {str(path)!r}')
       continue

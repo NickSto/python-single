@@ -354,7 +354,9 @@ class Status():
     else:
       latency_str = '{} ms'.format(int(latency))
     # How old is the last ping?
-    age = NOW - timestamp
+    # Use a fresh timestamp instead of `NOW`, in case execution has stalled and `NOW` is now *older*
+    # than `timestamp`.
+    age = int(time.time()) - timestamp
     age_str = human_time(age)
     if age < timeout:
       lastping = '{} / {} ago'.format(latency_str, age_str)

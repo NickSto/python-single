@@ -139,13 +139,13 @@ def human_timestamp(timestamp):
   then = datetime.datetime.fromtimestamp(timestamp)
   if then.strftime('%Y-%m-%d') == now.strftime('%Y-%m-%d'):
     # It's today. Just return the time.
-    return then.strftime(f'{get_12hr(then)}:%M:%S %p')
+    return then.strftime(f'{get_12hr(then):2d}:%M:%S %p')
   elif then - now < datetime.timedelta(weeks=12):
     # It's another day, but within 3 months.
-    return then.strftime(f'%b {then.day} {get_12hr(then)}:%M %p')
+    return then.strftime(f'%b {then.day:2d} {get_12hr(then):2d}:%M %p')
   elif then - now < datetime.timedelta(days=364):
     # It's within a year.
-    return then.strftime(f'%b {then.day}')
+    return then.strftime(f'%b {then.day:2d}')
   else:
     # It's over a year from now.
     return then.strftime('%Y-%m-%d')

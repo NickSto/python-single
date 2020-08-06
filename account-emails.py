@@ -1,8 +1,4 @@
-#!/usr/bin/env python
-from __future__ import division
-from __future__ import print_function
-from __future__ import absolute_import
-from __future__ import unicode_literals
+#!/usr/bin/env python3
 import os
 import sys
 import argparse
@@ -15,7 +11,7 @@ except ImportError:
 
 DEFAULT_TERMWIDTH = 80
 USAGE = "%(prog)s [options]"
-DESCRIPTION = """Go through my accounts and find all the dot-variations of my spam email address
+DESCRIPTION = """Go through my accounts and find all the dot-variations of my spam email addresses
 I've used."""
 
 
@@ -28,6 +24,8 @@ def main(argv):
     help='The accounts text file. Default: %(default)s.')
   parser.add_argument('-e', '--email', default='nmapsy',
     help='The email address to look for. Default: %(default)s')
+  parser.add_argument('-R', '--no-relay', dest='relay', default=True, action='store_false',
+    help="Don't include Firefox Relay addresses.")
   parser.add_argument('-c', '--choose', action='store_true',
     help='Just choose an unused email, or if all are used, the least-often used one.')
   parser.add_argument('-t', '--tabs', action='store_true',
@@ -73,6 +71,7 @@ def main(argv):
     basenames[email] = 0
 
   # Read accounts.txt file.
+  relays = collections.defaultdict(list)
   with open(args.accounts_path, 'rU') as accounts_file:
     for entry in accountslib.parse(accounts_file):
       for account in entry.accounts.values():
@@ -80,13 +79,21 @@ def main(argv):
           for key, values in section.items():
             if key.lower() == 'email':
               for value in values:
-                username = value.value.split('@')[0]
+                username, *rest = value.value.split('@')
+                if len(rest) == 1:
+                  domain = rest[0]
+                elif len(rest) == 0:
+                  domain = None
+                elif len(rest) > 1:
+                  raise ValueError(f'Invalid email {value.value!r}')
                 basename = username.split('+')[0]
                 if basename.replace('.', '') == args.email:
                   if args.collapse_dots:
                     basename = collapse_dots(basename)
                   basenames[basename] += 1
                   entries[basename].append(entry.name)
+                elif args.relay and domain == 'relay.firefox.com':
+                  relays[value.value].append(entry.name)
 
   # Print all the used combinations.
   least_used = None
@@ -112,6 +119,11 @@ def main(argv):
       print_email(basename, basenames[basename], entries[basename], args.tabs, termwidth)
   if args.choose:
     print_email(least_used, uses_min, entries[least_used], args.tabs, termwidth)
+  else:
+    for relay, entries in relays.items():
+      username, domain = relay.split('@')
+      domain_abbrev = domain.split('.')[0]
+      print_email(f'{username}@{domain_abbrev}', len(entries), entries, args.tabs, termwidth)
 
 
 def collapse_dots(dotted_str):
@@ -128,7 +140,7 @@ def print_email(email, uses, entries, tabs=False, width=80):
     print(email, uses, ','.join(entries), sep='\t')
   else:
     entries_str = ', '.join(entries)[:width-24]
-    print('{:16s}{}\t{}'.format(email+':', uses, entries_str))
+    print(f'{email+":":17s}{uses:<4d}{entries_str}')
 
 
 def fail(message):

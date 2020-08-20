@@ -1,13 +1,21 @@
 #!/usr/bin/env python3
 import argparse
-import distutils.spawn
 import logging
 import os
 import re
+import shutil
 import subprocess
 import sys
 import urllib.parse
 assert sys.version_info.major >= 3, 'Python 3 required'
+
+#TODO: WARC??
+#      Looks like there's no WARC feature as of June 2020, though IA has requested the feature:
+#      https://github.com/ytdl-org/youtube-dl/issues/21983
+#      It seems what the Archive does currently is it uses youtube-dl --get-url to extract the
+#      direct url to the Youtube video, then manually downloads with curl or wget.
+#      Note: Currently, you get two video urls with this method. It seems one has the video, and
+#      the other has the audio. Not sure if you can select different qualities.
 
 DESCRIPTION = """Download and label a video using youtube-dl."""
 YOUTUBE_DL_ARGS = ['--no-mtime', '--add-metadata', '--xattrs']
@@ -91,29 +99,18 @@ def main(argv):
 
   logging.basicConfig(stream=args.log, level=args.volume, format='%(message)s')
 
-  if not distutils.spawn.find_executable('youtube-dl'):
+  if not shutil.which('youtube-dl'):
     fail("Error: 'youtube-dl' command not found.")
 
   if args.formats:
     subprocess.run(('youtube-dl', '-F', args.url))
     return
 
-  site = site_is_supported(args.url)
-  if not site:
-    fail(
-      'Error: URL {!r} is not from a supported site ({}).'
-      .format(args.url, ', '.join([site['domain'] for site in SUPPORTED_SITES.values()]))
-    )
+  site = get_site(args.url)
+  if site is None:
+    fail('URL must be from a supported site.')
 
-  qual_key = None
-  if args.quality:
-    qualities = site.get('qualities', {})
-    qual_key = qualities.get(args.quality)
-    if qual_key is None:
-      logging.warning(
-        f'Warning: --quality {args.quality} unrecognized. Passing verbatim to youtube-dl.'
-      )
-      qual_key = args.quality
+  qual_key = get_quality_key(args.quality, site)
 
   formatter = Formatter(
     site, args.url, title=args.title, convert=args.convert_to, interactive=args.interactive,
@@ -121,11 +118,7 @@ def main(argv):
   )
   fmt_str = formatter.get_format_string()
 
-  end_args = ['-o', fmt_str, args.url]
-  if args.quality:
-    end_args = ['-f', qual_key] + end_args
-  if args.convert_to:
-    end_args = ['--extract-audio', '--audio-format', args.convert_to] + end_args
+  end_args = get_end_args(fmt_str, args.url, qual_key, args.convert_to)
 
   if args.get_filename:
     cmd = ['youtube-dl', '--get-filename'] + end_args
@@ -138,14 +131,38 @@ def main(argv):
   subprocess.run(cmd)
 
 
-def site_is_supported(url):
+def get_site(url):
   domain = urllib.parse.urlparse(url).netloc
   for name, site in SUPPORTED_SITES.items():
     supported_domain = site['domain']
     if domain.endswith(supported_domain):
       site['name'] = name
       return site
-  return False
+  supported_sites_str = ', '.join([site['domain'] for site in SUPPORTED_SITES.values()])
+  logging.error(f'Error: URL {url!r} is not from a supported site({supported_sites_str}).')
+  return None
+
+
+def get_quality_key(quality_arg, site):
+  if quality_arg:
+    qualities = site.get('qualities', {})
+    qual_key = qualities.get(quality_arg)
+    if qual_key is None:
+      logging.warning(
+        f'Warning: --quality {quality_arg} unrecognized. Passing verbatim to youtube-dl.'
+      )
+      qual_key = quality_arg
+    return qual_key
+  return None
+
+
+def get_end_args(fmt_str, url, qual_key, convert_to):
+  end_args = ['-o', fmt_str, url]
+  if qual_key:
+    end_args = ['-f', qual_key] + end_args
+  if convert_to:
+    end_args = ['--extract-audio', '--audio-format', convert_to] + end_args
+  return end_args
 
 
 def format_command(cmd):
@@ -216,6 +233,12 @@ class Formatter:
         good_url = True
     escaped_url = self.simplify_url(url)
     return f'[posted %(upload_date)s] [src {escaped_url}].%(ext)s'
+
+  #TODO: TikTok
+  #      Research so far: neither uploader_id, uploader, nor creator seem to work.
+  #      Not even ext, though it'll probably just be .mp4.
+  #      They seem to be working on a fix, but it's made slow progress from Oct 2019 to Jun 2020.
+  #      - I think this refers to pull request #22838
 
   def format_instagram(self):
     return self._format_instatwit()

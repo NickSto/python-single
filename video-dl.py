@@ -2,6 +2,7 @@
 import argparse
 import logging
 import os
+import pathlib
 import re
 import shutil
 import subprocess
@@ -72,6 +73,8 @@ def make_argparser():
   parser.add_argument('-f', '--quality',
     help='Video quality to request. Shorthands are available for {}. Anything else will be passed '
       'on literally to youtube-dl.'.format(', '.join(QUALITY_SITES)))
+  parser.add_argument('-o', '--out-dir', type=pathlib.Path,
+    help='Save the video to this directory.')
   parser.add_argument('-n', '--get-filename', action='store_true')
   parser.add_argument('-c', '--convert-to', choices=VALID_CONVERSIONS,
     help='Give a file extension to convert the video to this audio format. The file will be named '
@@ -118,7 +121,7 @@ def main(argv):
   )
   fmt_str = formatter.get_format_string()
 
-  end_args = get_end_args(fmt_str, args.url, qual_key, args.convert_to)
+  end_args = get_end_args(args.url, fmt_str, args.out_dir, qual_key, args.convert_to)
 
   if args.get_filename:
     cmd = ['youtube-dl', '--get-filename'] + end_args
@@ -156,8 +159,8 @@ def get_quality_key(quality_arg, site):
   return None
 
 
-def get_end_args(fmt_str, url, qual_key, convert_to):
-  end_args = ['-o', fmt_str, url]
+def get_end_args(url, fmt_str, out_dir, qual_key, convert_to):
+  end_args = ['-o', str(out_dir/fmt_str), url]
   if qual_key:
     end_args = ['-f', qual_key] + end_args
   if convert_to:

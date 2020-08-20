@@ -24,13 +24,14 @@ VALID_CONVERSIONS = ['mp3', 'm4a', 'flac', 'aac', 'wav']
 SUPPORTED_SITES = {
   'youtube': {
     'domain':'youtube.com',
+    'base_url': 'https://www.youtube.com/watch?v={id}',
     'qualities': {
       '360':'18',
       '640':'18',
       '480':'135+250',  # 80k audio, 480p video
       '720':'22',
       '1280':'22',
-    }
+    },
   },
   'vimeo': {
     'domain':'vimeo.com'
@@ -73,13 +74,18 @@ def make_argparser():
   parser.add_argument('-f', '--quality',
     help='Video quality to request. Shorthands are available for {}. Anything else will be passed '
       'on literally to youtube-dl.'.format(', '.join(QUALITY_SITES)))
-  parser.add_argument('-o', '--out-dir', type=pathlib.Path,
+  parser.add_argument('-o', '--outdir', type=pathlib.Path, default=pathlib.Path('.'),
     help='Save the video to this directory.')
   parser.add_argument('-n', '--get-filename', action='store_true')
   parser.add_argument('-c', '--convert-to', choices=VALID_CONVERSIONS,
     help='Give a file extension to convert the video to this audio format. The file will be named '
       '"{title}.{ext}".')
-  parser.add_argument('-p', '--posted',
+  parser.add_argument('-p', '--playlist', action='store_true',
+    help='The url is for a playlist. Download all videos from it.')
+  parser.add_argument('-C', '--check-existing', action='store_true',
+    help='Check whether the video has already been downloaded by looking in the output directory. '
+      "If it's already been downloaded, skip it. Currently this only works for playlists.")
+  parser.add_argument('-P', '--posted',
     help='The string to insert into the [posted YYYYMMDD] field, if none can be automatically '
       'determined.')
   parser.add_argument('-I', '--non-interactive', dest='interactive', default=True,
@@ -109,21 +115,43 @@ def main(argv):
     subprocess.run(('youtube-dl', '-F', args.url))
     return
 
-  site = get_site(args.url)
+  if not args.playlist:
+    download_video(
+      args.url, args.quality, args.title, args.outdir, args.convert_to, args.posted,
+      args.interactive, args.get_filename
+    )
+  else:
+    if args.check_existing:
+      downloaded = set(get_ids_from_directory(args.outdir))
+    else:
+      downloaded = set()
+    for vid in get_ids_from_playlist(args.url):
+      if vid in downloaded:
+        logging.info(f'Info: Skipping video {vid}: already downloaded.')
+        continue
+      site = get_site(args.url)
+      url = get_url_from_id(vid, site)
+      download_video(
+        url, args.quality, args.title, args.outdir, args.convert_to, args.posted, False,
+        args.get_filename
+      )
+
+
+def download_video(url, quality, title, outdir, convert_to, posted, interactive, get_filename):
+  site = get_site(url)
   if site is None:
     fail('URL must be from a supported site.')
 
-  qual_key = get_quality_key(args.quality, site)
+  qual_key = get_quality_key(quality, site)
 
   formatter = Formatter(
-    site, args.url, title=args.title, convert=args.convert_to, interactive=args.interactive,
-    posted=args.posted,
+    site, url, title=title, convert=convert_to, interactive=interactive, posted=posted,
   )
   fmt_str = formatter.get_format_string()
 
-  end_args = get_end_args(args.url, fmt_str, args.out_dir, qual_key, args.convert_to)
+  end_args = get_end_args(url, fmt_str, outdir, qual_key, convert_to)
 
-  if args.get_filename:
+  if get_filename:
     cmd = ['youtube-dl', '--get-filename'] + end_args
   else:
     cmd = ['youtube-dl'] + YOUTUBE_DL_ARGS + end_args
@@ -159,8 +187,8 @@ def get_quality_key(quality_arg, site):
   return None
 
 
-def get_end_args(url, fmt_str, out_dir, qual_key, convert_to):
-  end_args = ['-o', str(out_dir/fmt_str), url]
+def get_end_args(url, fmt_str, outdir, qual_key, convert_to):
+  end_args = ['-o', str(outdir/fmt_str), url]
   if qual_key:
     end_args = ['-f', qual_key] + end_args
   if convert_to:
@@ -299,6 +327,42 @@ def get_format_value(url, key):
 def double_escape_url(url):
   """Percent-encode a URL, then escape the %'s so they're safe for youtube-dl format strings."""
   return urllib.parse.quote(url, safe='').replace('%', '%%')
+
+
+def get_ids_from_directory(dirpath):
+  for filepath in dirpath.iterdir():
+    try:
+      vid = parse_id_from_filename(filepath.name)
+    except ValueError as error:
+      logging.info(error)
+    else:
+      yield vid
+
+
+def parse_id_from_filename(filename):
+  fields1 = filename.split('[id ')
+  if len(fields1) <= 1:
+    raise ValueError(f'Filename has no [id XXXXX] field: {filename!r}')
+  elif len(fields1) > 2:
+    raise ValueError(f'Filename has multiple [id XXXXX] fields: {filename!r}')
+  fields2 = fields1[1].split(']')
+  if len(fields2) <= 1:
+    raise ValueError(f'Filename has malformed [id XXXXX] field (no ending bracket): {filename!r}')
+  return fields2[0]
+
+
+def get_ids_from_playlist(url):
+  command = ['youtube-dl', '--get-id', url]
+  result = subprocess.run(command, encoding='utf8', stdout=subprocess.PIPE)
+  return result.stdout.splitlines()
+
+
+def get_url_from_id(vid, site):
+  try:
+    base_url = site['base_url']
+  except KeyError:
+    raise RuntimeError(f'Playlist downloading not supported for site {site["domain"]}')
+  return base_url.format(id=vid)
 
 
 def fail(message):

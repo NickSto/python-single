@@ -82,9 +82,10 @@ def make_argparser():
       '"{title}.{ext}".')
   parser.add_argument('-p', '--playlist', action='store_true',
     help='The url is for a playlist. Download all videos from it.')
-  parser.add_argument('-C', '--check-existing', action='store_true',
-    help='Check whether the video has already been downloaded by looking in the output directory. '
-      "If it's already been downloaded, skip it. Currently this only works for playlists.")
+  parser.add_argument('-C', '--check-existing', type=pathlib.Path,
+    help='Check whether the video has already been downloaded by looking in this directory. '
+      "If it's already been downloaded, skip it. Currently this only works for playlists. "
+      'Note: This will check every subdirectory, recursively.')
   parser.add_argument('-P', '--posted',
     help='The string to insert into the [posted YYYYMMDD] field, if none can be automatically '
       'determined.')
@@ -122,7 +123,7 @@ def main(argv):
     )
   else:
     if args.check_existing:
-      downloaded = set(get_ids_from_directory(args.outdir))
+      downloaded = set(get_ids_from_directory(args.check_existing))
     else:
       downloaded = set()
     for vid in get_ids_from_playlist(args.url):
@@ -330,13 +331,14 @@ def double_escape_url(url):
 
 
 def get_ids_from_directory(dirpath):
-  for filepath in dirpath.iterdir():
-    try:
-      vid = parse_id_from_filename(filepath.name)
-    except ValueError as error:
-      logging.info(error)
-    else:
-      yield vid
+  for dirpath, dirnames, filenames in os.walk(dirpath):
+    for filename in filenames:
+      try:
+        vid = parse_id_from_filename(filename)
+      except ValueError as error:
+        logging.info(error)
+      else:
+        yield vid
 
 
 def parse_id_from_filename(filename):

@@ -100,7 +100,10 @@ def get_current_count(command, field, eval_):
 
 
 def parse_result(result_str, field):
-  last_line = result_str.splitlines()[-1]
+  lines = result_str.splitlines()
+  if not lines:
+    raise ValueError('No output returned from command')
+  last_line = lines[-1]
   if field:
     fields = last_line.split()
     if len(fields) < field:

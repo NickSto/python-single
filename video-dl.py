@@ -21,6 +21,7 @@ assert sys.version_info.major >= 3, 'Python 3 required'
 DESCRIPTION = """Download and label a video using youtube-dl."""
 YOUTUBE_DL_ARGS = ['--no-mtime', '--add-metadata', '--xattrs']
 VALID_CONVERSIONS = ['mp3', 'm4a', 'flac', 'aac', 'wav']
+SILENCE_PATH = pathlib.Path('~/.local/share/nbsdata/SILENCE').expanduser()
 SUPPORTED_SITES = {
   'youtube': {
     'domain':'youtube.com',
@@ -111,6 +112,9 @@ def main(argv):
 
   if not shutil.which('youtube-dl'):
     fail("Error: 'youtube-dl' command not found.")
+
+  if SILENCE_PATH.exists():
+    fail(f'Error: Silence file exists: {str(SILENCE_PATH)!r}')
 
   if args.formats:
     subprocess.run(('youtube-dl', '-F', args.url))

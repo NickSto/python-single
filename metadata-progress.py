@@ -132,7 +132,9 @@ def find_old_intersect(old_log, current_bytes):
     last_time = this_time
     last_bytes = this_bytes
   end_time = last_time
-  return start_time, round(intersect_time), end_time
+  if intersect_time is None:
+    raise ValueError
+  return start_time, intersect_time, end_time
 
 
 def calc_remaining(new_start, new_current, old_start, old_intersect, old_end):
@@ -163,7 +165,7 @@ def parse_log_line(line_raw):
 
 
 def plot_progress(old_log, new_log):
-  cmd = ['scatterplot.py', '-g', '1', '-x', '2', '-y', '3', '-X', 'Hours', '-Y', 'GB']
+  cmd = ['scatterplot.py', '--grid', '-g', '1', '-x', '2', '-y', '3', '-X', 'Hours', '-Y', 'GB']
   process = subprocess.Popen(cmd, stdin=subprocess.PIPE, encoding='utf8')
   for line_raw in get_plot_lines(old_log, new_log):
     process.stdin.write(line_raw)

@@ -15,6 +15,12 @@ def send_signals(process_names, signal):
       os.kill(pid, signal)
 
 
+def find_processes(query):
+  for pid, argv in list_processes():
+    if match_cmdline(argv, query):
+      yield pid
+
+
 def list_processes():
   """Generate a list of pids and command lines of running processes."""
   for proc_dir in PROC_ROOT.iterdir():
@@ -48,16 +54,27 @@ def match_cmdline(argv, queries):
   return False
 
 
-def fail(message):
-  logging.critical(message)
-  if __name__ == '__main__':
-    sys.exit(1)
-  else:
-    raise Exception('Unrecoverable error')
-
-
-if __name__ == '__main__':
+def get_environ_vars(pid):
+  variables = {}
+  environ_path = PROC_ROOT/f'{pid}/environ'
+  if not environ_path.is_file():
+    logging.info(f'Info: Process {pid} environment not found.')
+    return None
   try:
-    sys.exit(main(sys.argv))
-  except BrokenPipeError:
-    pass
+    environ_bytes = environ_path.open('rb').read()
+  except IOError:
+    # Process ended before we got to read it, or we don't have enough permissions.
+    logging.info(f'Info: Process {pid} environment not readable.')
+    return None
+  if len(environ_bytes) == 0:
+    return variables
+  for line_bytes in environ_bytes.split(b'\0'):
+    line = str(line_bytes, 'utf8')
+    if line == '':
+      continue
+    fields = line.split('=')
+    if len(fields) < 2:
+      logging.info(f'Info: Malformed environment variable definition in {environ_path}: {line!r}')
+      continue
+    variables[fields[0]] = '='.join(fields[1:])
+  return variables

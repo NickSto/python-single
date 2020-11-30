@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 import argparse
 import logging
+import os
 import pathlib
 import signal
 import subprocess
@@ -41,18 +42,28 @@ def main(argv):
 
   parser = make_argparser()
   args = parser.parse_args(argv[1:])
+  log_file = args.log.open('a')
 
   logging.basicConfig(stream=args.error_log, level=args.volume, format='%(message)s')
 
-  command = get_dbus_command()
-  logging.info('Info: $ '+' '.join(command))
-  try:
-    process = subprocess.Popen(command, encoding='utf8', stdout=subprocess.PIPE)
-  except (OSError, subprocess.CalledProcessError) as error:
-    logging.critical('Critical: Failure to execute dbus-monitor command: {}'.format(error))
-    raise
+  for event in get_lock_events():
+    if event == 'lock':
+      logging.info('Info: Screen locked.')
+      messaging.send_signals(args.processes, signal.SIGUSR1)
+      print(f'{time.time()}\tpre\tlock', file=log_file)
+      log_file.flush()
+    elif event == 'unlock':
+      logging.info('Info: Screen unlocked.')
+      messaging.send_signals(args.processes, signal.SIGUSR2)
+      print(f'{time.time()}\tpost\tlock', file=log_file)
+      log_file.flush()
 
-  watch_dbus(process, args.processes, args.log)
+
+def get_lock_events():
+  command = get_dbus_command()
+  logging.info('DBus command: $ '+' '.join(command))
+  process = run_command(command)
+  return filter_for_lock_events(process.stdout)
 
 
 def get_dbus_command():
@@ -73,44 +84,52 @@ def get_dbus_command():
   return command
 
 
-def watch_dbus(process, process_names, log_path):
+def run_command(command):
+  try:
+    process = subprocess.Popen(command, encoding='utf8', stdout=subprocess.PIPE)
+  except (OSError, subprocess.CalledProcessError) as error:
+    logging.critical(f'Critical: Failure to execute command {command!r}: {error}')
+    raise
+  return process
+
+
+def filter_for_lock_events(event_stream):
   correct_signal = False
-  for line_raw in process.stdout:
+  for line_raw in event_stream:
     fields = line_raw.split()
     if correct_signal and len(fields) == 2 and fields[0] == 'boolean':
       if fields[1] == 'true':
-        logging.info('Info: Screen locked.')
-        messaging.send_signals(process_names, signal.SIGUSR1)
-        with log_path.open('a') as log_file:
-          log_file.write('{}\tpre\tlock\n'.format(time.time()))
+        yield 'lock'
       elif fields[1] == 'false':
-        logging.info('Info: Screen unlocked.')
-        messaging.send_signals(process_names, signal.SIGUSR2)
-        with log_path.open('a') as log_file:
-          log_file.write('{}\tpost\tlock\n'.format(time.time()))
+        yield 'unlock'
       correct_signal = False
     elif 'path=/org/gnome/ScreenSaver;' in fields and 'member=ActiveChanged' in fields:
       correct_signal = True
 
 
 def get_session_bus_address():
+  for pid in get_session_bus_processes():
+    address = get_dbus_environ(pid)
+    if address:
+      return address
+
+
+def get_session_bus_processes():
+  for pid in messaging.find_processes(('dbus-daemon',)):
+    yield pid
   for pid, argv in messaging.list_processes():
-    if messaging.match_cmdline(argv, ('dbus-daemon',)):
-      environ_path = messaging.PROC_ROOT/str(pid)/'environ'
-      if not environ_path.is_file():
-        continue
-      try:
-        environ_bytes = environ_path.open('rb').read()
-      except IOError:
-        # Process ended before we got to read it, or we don't have enough permissions.
-        continue
-      for line_bytes in environ_bytes.split(b'\0'):
-        line = str(line_bytes, 'utf8')
-        fields = line.split('=')
-        if len(fields) < 2:
-          continue
-        if fields[0] == 'DBUS_SESSION_BUS_ADDRESS':
-          return '='.join(fields[1:])
+    if len(argv) <= 0:
+      continue
+    cmd = argv[0]
+    base_cmd = os.path.split(cmd)[1]
+    if base_cmd.startswith('gnome-session'):
+      yield pid
+
+
+def get_dbus_environ(pid):
+  variables = messaging.get_environ_vars(pid)
+  if variables and 'DBUS_SESSION_BUS_ADDRESS' in variables:
+    return variables['DBUS_SESSION_BUS_ADDRESS']
 
 
 def fail(message):

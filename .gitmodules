@@ -6,4 +6,4 @@
 	url = https://github.com/makrutenko/common.git
 [submodule "oyaml"]
 	path = oyaml
-	url = https://github.com/wimglenn/oyaml.git
+	url = https://github.com/NickSto/oyaml.git

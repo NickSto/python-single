@@ -34,7 +34,7 @@ def make_argparser():
   parser.add_argument('-l', '--log', type=argparse.FileType('w'), default=sys.stderr,
     help='Print log messages to this file instead of to stderr. Warning: Will overwrite the file.')
   parser.add_argument('-q', '--quiet', dest='volume', action='store_const', const=logging.CRITICAL,
-    default=logging.WARN)
+    default=logging.WARNING)
   parser.add_argument('-v', '--verbose', dest='volume', action='store_const', const=logging.INFO)
   parser.add_argument('-D', '--debug', dest='volume', action='store_const', const=logging.DEBUG)
   parser.add_argument('-t', '--test', action='store_true',
@@ -215,13 +215,13 @@ def chunk_byte_sequence_str(input_bytes):
     char_bytes.append(byte)
     if byte.startswith('0'):
       if bytes_togo > 0:
-        logging.warn('Invalid byte sequence (not enough continuation bytes): "{}"'
+        logging.warning('Invalid byte sequence (not enough continuation bytes): "{}"'
                      .format(' '.join(char_bytes)))
       yield char_bytes
       char_bytes = []
     elif byte.startswith('11'):
       if bytes_togo > 0:
-        logging.warn('Invalid byte sequence (not enough continuation bytes): "{}"'
+        logging.warning('Invalid byte sequence (not enough continuation bytes): "{}"'
                      .format(' '.join(char_bytes)))
         char_bytes = []
         bytes_togo = 0
@@ -231,18 +231,18 @@ def chunk_byte_sequence_str(input_bytes):
       bytes_togo = leading_bits.count('1') - 1
     elif byte.startswith('10'):
       if bytes_togo == 0:
-        logging.warn('Invalid byte sequence (misplaced continuation byte): "{}"'.format(byte))
+        logging.warning('Invalid byte sequence (misplaced continuation byte): "{}"'.format(byte))
         char_bytes = []
       else:
         bytes_togo -= 1
         if bytes_togo == 0:
           if len(char_bytes) > 4:
-            logging.warn('Invalid byte sequence (more than 4 bytes): "{}"'
+            logging.warning('Invalid byte sequence (more than 4 bytes): "{}"'
                          .format(' '.join(char_bytes)))
           yield char_bytes
           char_bytes = []
   if len(char_bytes) > 0:
-    logging.warn('Invalid byte sequence (not enough continuation bytes): "{}"'
+    logging.warning('Invalid byte sequence (not enough continuation bytes): "{}"'
                  .format(' '.join(char_bytes)))
 
 
@@ -255,13 +255,13 @@ def chunk_byte_sequence_bit(input_bytes):
     char_bytes.append(byte)
     if byte >> 7 == 0:  # first bit is 0
       if bytes_togo > 0:
-        logging.warn('Invalid byte sequence (not enough continuation bytes): "{}"'
+        logging.warning('Invalid byte sequence (not enough continuation bytes): "{}"'
                      .format(' '.join([bin(b)[2:] for b in char_bytes])))
       yield char_bytes
       char_bytes = []
     elif byte >> 6 == 0b11:  # first two bits are 11
       if bytes_togo > 0:
-        logging.warn('Invalid byte sequence (not enough continuation bytes): "{}"'
+        logging.warning('Invalid byte sequence (not enough continuation bytes): "{}"'
                      .format(' '.join([bin(b)[2:] for b in char_bytes])))
         char_bytes = []
         bytes_togo = 0
@@ -269,18 +269,18 @@ def chunk_byte_sequence_bit(input_bytes):
       bytes_togo = num_leading_bits - 1
     elif byte >> 6 == 0b10:  # first two bits are 10
       if bytes_togo == 0:
-        logging.warn('Invalid byte sequence (misplaced continuation byte): "{}"'.format(byte))
+        logging.warning('Invalid byte sequence (misplaced continuation byte): "{}"'.format(byte))
         char_bytes = []
       else:
         bytes_togo -= 1
         if bytes_togo == 0:
           if len(char_bytes) > 4:
-            logging.warn('Invalid byte sequence (more than 4 bytes): "{}"'
+            logging.warning('Invalid byte sequence (more than 4 bytes): "{}"'
                          .format(' '.join([bin(b)[2:] for b in char_bytes])))
           yield char_bytes
           char_bytes = []
   if len(char_bytes) > 0:
-    logging.warn('Invalid byte sequence (not enough continuation bytes): "{}"'
+    logging.warning('Invalid byte sequence (not enough continuation bytes): "{}"'
                  .format(' '.join([bin(b)[2:] for b in char_bytes])))
 
 
@@ -319,8 +319,7 @@ def char_bytes_to_code_point_str(char_bytes):
         # Leading byte of a multibyte sequence.
         code_point_bits = re.sub(r'^1+0', '', byte)
       else:
-        logging.warn('Invalid byte sequence: "{}" (error on byte {})'
-                     .format(' '.join(char_bytes), byte))
+        logging.warning(f'Invalid byte sequence: {" ".join(char_bytes)!r} (error on byte {byte})')
         raise ValueError
     else:
       # Continuation byte of a multibyte sequence.
@@ -346,7 +345,7 @@ def char_bytes_to_code_point_bit(char_bytes):
         mask = 2**num_code_point_bits - 1
         code_point = byte & mask
       else:
-        logging.warn('Invalid byte sequence: "{}" (error on byte {})'
+        logging.warning('Invalid byte sequence: "{}" (error on byte {})'
                      .format(' '.join([bin(b)[2:] for b in char_bytes]), bin(byte)[2:]))
         raise ValueError
     else:
@@ -361,13 +360,25 @@ def format_code_point_output(code_point_int):
   code_point_hex = hex(code_point_int)[2:].upper()
   code_point_hex = pad_hex(code_point_hex)
   character = chr(code_point_int)
-  hex_col = 'U+{}:'.format(code_point_hex)
+  hex_col = f'U+{code_point_hex}:'
   try:
     character_name = unicodedata.name(character)
+    character_str = f'({character_name})'
   except ValueError:
-    logging.warn('No name for character {}.'.format(code_point_hex))
-    character_name = 'N/A'
-  return '{:9s} {} ({})'.format(hex_col, character, character_name)
+    if code_point_int == 9:
+      character_name = 'tab'
+      character = '\\t'
+    elif code_point_int == 10:
+      character_name = 'newline'
+      character = '\\n'
+    elif code_point_int == 13:
+      character_name = 'carriage return'
+      character = '\\r'
+    else:
+      logging.warning(f'No name for character {code_point_hex}.')
+      character_name = 'N/A'
+    character_str = f'[{character_name}]'
+  return f'{hex_col:9s} {character:2s} {character_str}'
 
 
 def pad_hex(hex_input, pad_to=None):

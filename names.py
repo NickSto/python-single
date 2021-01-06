@@ -9,15 +9,7 @@ import sys
 import accountslib
 assert sys.version_info.major >= 3, 'Python 3 required'
 
-# https://twitter.com/lrgmnn/status/813635533658144768
-BASE_MEN = (
-  ('Sleve', 'McDichael'), ('Onson', 'Sweemey'), ('Darryl', 'Archideld'), ('Anatoli', 'Smorin'),
-  ('Rey', 'McSriff'), ('Glenallen', 'Mixon'), ('Mario', 'Mcrlwain'), ('Raul', 'Chamgerlain'),
-  ('Kevin', 'Nogilny'), ('Tony', 'Smehrik'), ('Bobson', 'Dugnutt'), ('Willie', 'Dustice'),
-  ('Jeromy', 'Gride'), ('Scott', 'Dourque'), ('Shown', 'Furcotte'), ('Dean', 'Wesrey'),
-  ('Mike', 'Truk'), ('Dwigt', 'Rortugal'), ('Tim', 'Sandaele'), ('Karl', 'Dandleton'),
-  ('Mike', 'Sernandez'), ('Todd', 'Bonzalez')
-)
+SCRIPT_DIR = pathlib.Path(__file__).resolve().parent
 DESCRIPTION = """Generate random names. Omit ones I've already used in online accounts."""
 
 
@@ -32,6 +24,14 @@ def make_argparser():
   parser.add_argument('-u', '--print-used', action='store_true',
     help='Just print a list of all names already used, and how many times they appear in the '
       'accounts.txt file.')
+  parser.add_argument('-n', '--names', type=csv_paths, default=str(SCRIPT_DIR/'names.baseball.txt'),
+    help='Use this file(s) as a source of names. Use these up before generating random ones. Give '
+      'a comma-delimited list of paths. Default: %(default)s')
+  parser.add_argument('-e', '--extra', type=csv_paths, default=str(SCRIPT_DIR/'names.mst3k.txt'),
+    help='Add in some names from this file(s) at the end. Same format as --names. '
+      'Default: %(default)s')
+  parser.add_argument('-E', '--num-extra', default=5, type=int,
+    help='Add this many names from the extra name files at the end. Default: %(default)s')
   options.add_argument('-h', '--help', action='help',
     help='Print this argument help text and exit.')
   logs = parser.add_argument_group('Logging')
@@ -52,26 +52,49 @@ def main(argv):
 
   logging.basicConfig(stream=args.log, level=args.volume, format='%(message)s')
 
-  used_names = collections.Counter(get_names(args.accounts))
-  logging.info(f'Info: {len(used_names)} used names.')
+  used_name_counts = collections.Counter(get_used_names(args.accounts))
+  logging.info(f'Info: {len(used_name_counts)} used names.')
 
   if args.print_used:
-    print_used(used_names)
+    print_used(used_name_counts)
+
+  names_list = read_names_files(args.names)
+  extra_names = read_names_files(args.extra)
   
-  used_names_lc = lowercase_name_counts(used_names)
+  used_names_lc = set(lowercase_name_counts(used_name_counts))
 
-  unused_base_men = get_unused_base_men(BASE_MEN, used_names_lc)
+  unused_static_names = get_unused_names(names_list, used_names_lc)
 
-  needed_names = args.num_names - len(unused_base_men)
+  needed_names = args.num_names - len(unused_static_names)
 
   unused_random_names = get_unused_random_names(needed_names, used_names_lc, gender='male')
 
-  unused_names = unused_base_men + unused_random_names
+  unused_names = unused_static_names + unused_random_names
   for name in sorted(unused_names[:args.num_names]):
     print(name)
 
+  if args.extra:
+    print('---')
+    for name in randomize(extra_names)[:args.num_extra]:
+      print(name)
 
-def get_names(accounts_path):
+
+def read_names_files(names_paths):
+  names = []
+  for names_path in names_paths:
+    names.extend(read_names_file(names_path))
+  return names
+
+
+def read_names_file(names_path):
+  with names_path.open() as names_file:
+    for line_raw in names_file:
+      line = line_raw.strip()
+      if not line.startswith('#'):
+        yield line
+
+
+def get_used_names(accounts_path):
   with accounts_path.open() as accounts_file:
     for entry in accountslib.parse(accounts_file):
       for account in entry.accounts.values():
@@ -95,13 +118,12 @@ def print_used(names):
     print(f'{count:4d} {name}')
 
 
-def get_unused_base_men(base_men, used_names_lc):
-  unused_base_men = []
-  for first, last in sorted(base_men, key=lambda e: random.random()):
-    name = f'{first} {last}'
+def get_unused_names(names, used_names_lc):
+  unused_names = []
+  for name in randomize(names):
     if name.lower() not in used_names_lc:
-      unused_base_men.append(name)
-  return unused_base_men
+      unused_names.append(name)
+  return unused_names
 
 
 def get_unused_random_names(num_names, used_names_lc, gender=None):
@@ -132,6 +154,14 @@ def run_rig(num_names, gender=None):
   logging.info(f'Info: Running $ {" ".join(command)}')
   result = subprocess.run(command, encoding='utf8', stdout=subprocess.PIPE)
   return result.stdout.splitlines()
+
+
+def csv_paths(csv_str):
+  return [pathlib.Path(path_str) for path_str in csv_str.split(',')]
+
+
+def randomize(list_):
+  return sorted(list_, key=lambda e: random.random())
 
 
 def fail(message):

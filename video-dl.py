@@ -59,6 +59,9 @@ SUPPORTED_SITES = {
   },
   'twitch': {
     'domain':'clips.twitch.tv'
+  },
+  'tiktok': {
+    'domain':'tiktok.com'
   }
 }
 QUALITY_SITES = [name for name, site in SUPPORTED_SITES.items() if 'qualities' in site]
@@ -270,11 +273,14 @@ class Formatter:
     escaped_url = self.simplify_url(url)
     return f'[posted %(upload_date)s] [src {escaped_url}].%(ext)s'
 
-  #TODO: TikTok
-  #      Research so far: neither uploader_id, uploader, nor creator seem to work.
-  #      Not even ext, though it'll probably just be .mp4.
-  #      They seem to be working on a fix, but it's made slow progress from Oct 2019 to Jun 2020.
-  #      - I think this refers to pull request #22838
+  #TODO: Figure out how to get the username.
+  #      Tiktok urls look like `https://www.tiktok.com/@wallacenoises/video/6915592857738923269`.
+  #      Getting the id at the end now works with `%(id)s`, but as of 2021.1.8 there still doesn't
+  #      seem to be a way to get the @ username. `uploader_id` gives a long integer, `uploader`
+  #      gives the user's display name, and `channel`, `channel_id`, and `creator` all give "NA".
+  def format_tiktok(self):
+    escaped_url = self.simplify_url(self.url)
+    return f'[posted %(upload_date)s] [src {escaped_url}].%(ext)s'
 
   def format_instagram(self):
     return self._format_instatwit()

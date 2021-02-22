@@ -75,7 +75,8 @@ def main(argv):
 
   if args.extra:
     print('---')
-    for name in randomize(extra_names)[:args.num_extra]:
+    unused_extra_names = get_unused_names(extra_names, used_names_lc)
+    for name in unused_extra_names[:args.num_extra]:
       print(name)
 
 

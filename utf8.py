@@ -60,14 +60,13 @@ def main(argv):
   if args.input_type == 'bytes' and args.input_format == 'str':
     # The default input format for bytes should be hex.
     input_format = 'hex'
+  output_format = args.output_format
   if args.output_type == 'bytes':
     if args.output_format == 'desc':
       # The default output for bytes should be hex.
       output_format = 'hex'
     elif args.output_format == 'str':
       fail('"str" is an invalid output format for type "bytes".')
-  else:
-    output_format = args.output_format
 
   input_strs = get_input(args.inputs, input_format)
 

@@ -16,22 +16,26 @@ DESCRIPTION = """Generate random names. Omit ones I've already used in online ac
 def make_argparser():
   parser = argparse.ArgumentParser(add_help=False, description=DESCRIPTION)
   options = parser.add_argument_group('Options')
+  parser.add_argument('accounts', metavar='accounts.txt', nargs='?', type=pathlib.Path,
+    help='The accounts text file. Default: %(default)s.')
   parser.add_argument('num_names', type=int, default=10, nargs='?',
     help='Choose and print this many names. Default: %(default)s')
-  parser.add_argument('accounts', metavar='accounts.txt', nargs='?', type=pathlib.Path,
-    default=pathlib.Path('~/annex/Info/reference, notes/accounts.txt').expanduser(),
-    help='The accounts text file. Default: %(default)s.')
+  parser.add_argument('-a', '--args', metavar='args.txt', type=pathlib.Path,
+    default=SCRIPT_DIR/'names.args.txt',
+    help='Use arguments from this file, if it exists, instead of from the command line. Arguments '
+      'can be separated by either a tab or newline character. Default: %(default)s')
   parser.add_argument('-u', '--print-used', action='store_true',
     help='Just print a list of all names already used, and how many times they appear in the '
       'accounts.txt file.')
-  parser.add_argument('-n', '--names', type=csv_paths, default=str(SCRIPT_DIR/'names.baseball.txt'),
-    help='Use this file(s) as a source of names. Use these up before generating random ones. Give '
+  parser.add_argument('-n', '--names', action='append', type=pathlib.Path, default=[],
+    help='Use this file as a source of names. Use these up before generating random ones. Give '
       'a comma-delimited list of paths. Default: %(default)s')
-  parser.add_argument('-e', '--extra', type=csv_paths, default=str(SCRIPT_DIR/'names.mst3k.txt'),
+  parser.add_argument('-e', '--extra', action='append', type=pathlib.Path, default=[],
     help='Add in some names from this file(s) at the end. Same format as --names. '
       'Default: %(default)s')
   parser.add_argument('-E', '--num-extra', default=5, type=int,
-    help='Add this many names from the extra name files at the end. Default: %(default)s')
+    help='Add this many names from the extra name files at the end. This is in addition to the '
+      'number of primary names specified. Default: %(default)s')
   options.add_argument('-h', '--help', action='help',
     help='Print this argument help text and exit.')
   logs = parser.add_argument_group('Logging')
@@ -49,35 +53,64 @@ def main(argv):
 
   parser = make_argparser()
   args = parser.parse_args(argv[1:])
-
   logging.basicConfig(stream=args.log, level=args.volume, format='%(message)s')
+  if args.args.is_file():
+    logging.info(f'Info: Using arguments from {args.args} instead of command line.')
+    args_list = read_args_file(args.args)
+    args = parser.parse_args(args_list)
+
+  if args.accounts is None:
+    logging.error(f'Error: Must give an accounts text file.')
+    parser.print_usage()
+    return 1
+
+  # Read in the already-used names from the accounts file.
 
   used_name_counts = collections.Counter(get_used_names(args.accounts))
   logging.info(f'Info: {len(used_name_counts)} used names.')
 
   if args.print_used:
     print_used(used_name_counts)
+    return 0
 
-  names_list = read_names_files(args.names)
-  extra_names = read_names_files(args.extra)
-  
   used_names_lc = set(lowercase_name_counts(used_name_counts))
 
-  unused_static_names = get_unused_names(names_list, used_names_lc)
+  # Print names from the --names file(s), if given.
+
+  names_list = read_names_files(args.names)
+  unused_static_names = randomize(get_unused_names(names_list, used_names_lc))
+  for name in sorted(unused_static_names[:args.num_names]):
+    print(name)
 
   needed_names = args.num_names - len(unused_static_names)
 
-  unused_random_names = get_unused_random_names(needed_names, used_names_lc, gender='male')
+  # Print random names (from rig), if needed.
 
-  unused_names = unused_static_names + unused_random_names
-  for name in sorted(unused_names[:args.num_names]):
-    print(name)
+  if needed_names:
+    unused_random_names = get_unused_random_names(needed_names, used_names_lc, gender='male')
+    if args.names:
+      print('---')
+    for name in sorted(unused_random_names[:needed_names]):
+      print(name)
 
-  if args.extra:
+  # Print names from the --extra file(s), if given.
+
+  if args.extra and args.num_extra > 0:
+    extra_names = read_names_files(args.extra)
     print('---')
-    unused_extra_names = get_unused_names(extra_names, used_names_lc)
+    unused_extra_names = randomize(get_unused_names(extra_names, used_names_lc))
     for name in unused_extra_names[:args.num_extra]:
       print(name)
+
+
+def read_args_file(args_path):
+  args = []
+  with args_path.open() as args_file:
+    for line_raw in args_file:
+      line = line_raw.rstrip('\r\n')
+      if line:
+        args.extend(line.split('\t'))
+  return args
 
 
 def read_names_files(names_paths):
@@ -114,14 +147,16 @@ def lowercase_name_counts(name_counts):
 
 
 def print_used(names):
-  print(f'{len(names)} used names:')
+  print(f'{len(names):4d} Used Names')
+  print('===============')
   for name, count in sorted(names.items(), key=lambda item: item[1], reverse=True):
     print(f'{count:4d} {name}')
 
 
 def get_unused_names(names, used_names_lc):
+  """Subtract used names from the list `names`."""
   unused_names = []
-  for name in randomize(names):
+  for name in names:
     if name.lower() not in used_names_lc:
       unused_names.append(name)
   return unused_names
@@ -155,10 +190,6 @@ def run_rig(num_names, gender=None):
   logging.info(f'Info: Running $ {" ".join(command)}')
   result = subprocess.run(command, encoding='utf8', stdout=subprocess.PIPE)
   return result.stdout.splitlines()
-
-
-def csv_paths(csv_str):
-  return [pathlib.Path(path_str) for path_str in csv_str.split(',')]
 
 
 def randomize(list_):

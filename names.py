@@ -11,39 +11,40 @@ assert sys.version_info.major >= 3, 'Python 3 required'
 
 SCRIPT_DIR = pathlib.Path(__file__).resolve().parent
 DESCRIPTION = """Generate random names. Omit ones I've already used in online accounts."""
-
+DEFAULTS = {'num_names':10, 'names':[], 'extra':[], 'num_extra':5, 'log':sys.stderr, 'volume':logging.WARNING}
 
 def make_argparser():
   parser = argparse.ArgumentParser(add_help=False, description=DESCRIPTION)
   options = parser.add_argument_group('Options')
-  parser.add_argument('accounts', metavar='accounts.txt', nargs='?', type=pathlib.Path,
-    help='The accounts text file. Default: %(default)s.')
-  parser.add_argument('num_names', type=int, default=10, nargs='?',
+  parser.add_argument('num_names', type=int, nargs='?',
     help='Choose and print this many names. Default: %(default)s')
-  parser.add_argument('-a', '--args', metavar='args.txt', type=pathlib.Path,
+  parser.add_argument('-a', '--accounts', metavar='accounts.txt', nargs='?', type=pathlib.Path,
+    help='The accounts text file. Required, unless --args is given (and contains the file).')
+  parser.add_argument('-A', '--args', metavar='args.txt', type=pathlib.Path,
     default=SCRIPT_DIR/'names.args.txt',
     help='Use arguments from this file, if it exists, instead of from the command line. Arguments '
       'can be separated by either a tab or newline character. Default: %(default)s')
   parser.add_argument('-u', '--print-used', action='store_true',
     help='Just print a list of all names already used, and how many times they appear in the '
       'accounts.txt file.')
-  parser.add_argument('-n', '--names', action='append', type=pathlib.Path, default=[],
+  parser.add_argument('-r', '--rig', action='store_true',
+    help="Just print names from rig. Don't use any other name sources.")
+  parser.add_argument('-n', '--names', action='append', type=pathlib.Path,
     help='Use this file as a source of names. Use these up before generating random ones. Give '
       'a comma-delimited list of paths. Default: %(default)s')
-  parser.add_argument('-e', '--extra', action='append', type=pathlib.Path, default=[],
+  parser.add_argument('-e', '--extra', action='append', type=pathlib.Path,
     help='Add in some names from this file(s) at the end. Same format as --names. '
       'Default: %(default)s')
-  parser.add_argument('-E', '--num-extra', default=5, type=int,
+  parser.add_argument('-E', '--num-extra', type=int,
     help='Add this many names from the extra name files at the end. This is in addition to the '
       'number of primary names specified. Default: %(default)s')
   options.add_argument('-h', '--help', action='help',
     help='Print this argument help text and exit.')
   logs = parser.add_argument_group('Logging')
-  logs.add_argument('-l', '--log', type=argparse.FileType('w'), default=sys.stderr,
+  logs.add_argument('-l', '--log', type=argparse.FileType('w'),
     help='Print log messages to this file instead of to stderr. Warning: Will overwrite the file.')
   volume = logs.add_mutually_exclusive_group()
-  volume.add_argument('-q', '--quiet', dest='volume', action='store_const', const=logging.CRITICAL,
-    default=logging.WARNING)
+  volume.add_argument('-q', '--quiet', dest='volume', action='store_const', const=logging.CRITICAL)
   volume.add_argument('-v', '--verbose', dest='volume', action='store_const', const=logging.INFO)
   volume.add_argument('-D', '--debug', dest='volume', action='store_const', const=logging.DEBUG)
   return parser
@@ -52,12 +53,28 @@ def make_argparser():
 def main(argv):
 
   parser = make_argparser()
+
+  # Initial arg parsing, just to get the --args argument and read in the args file.
   args = parser.parse_args(argv[1:])
+  for arg, value in DEFAULTS.items():
+    setattr(args, arg, value)
   logging.basicConfig(stream=args.log, level=args.volume, format='%(message)s')
   if args.args.is_file():
-    logging.info(f'Info: Using arguments from {args.args} instead of command line.')
+    logging.info(f'Info: Using arguments from {args.args}.')
     args_list = read_args_file(args.args)
     args = parser.parse_args(args_list)
+
+  # Read in the command line arguments and update the args from the args file.
+  new_args = parser.parse_args(argv[1:])
+  for arg in dir(args):
+    if arg.startswith('_'):
+      continue
+    new_value = getattr(new_args, arg)
+    if new_value is not None:
+      if new_value == [pathlib.Path('')]:
+        # Allow setting the --names or --extra to empty by giving an empty string.
+        new_value = []
+      setattr(args, arg, new_value)
 
   if args.accounts is None:
     logging.error(f'Error: Must give an accounts text file.')
@@ -77,7 +94,10 @@ def main(argv):
 
   # Print names from the --names file(s), if given.
 
-  names_list = read_names_files(args.names)
+  if args.rig:
+    names_list = []
+  else:
+    names_list = read_names_files(args.names)
   unused_static_names = randomize(get_unused_names(names_list, used_names_lc))
   for name in sorted(unused_static_names[:args.num_names]):
     print(name)
@@ -88,14 +108,14 @@ def main(argv):
 
   if needed_names:
     unused_random_names = get_unused_random_names(needed_names, used_names_lc, gender='male')
-    if args.names:
+    if names_list:
       print('---')
     for name in sorted(unused_random_names[:needed_names]):
       print(name)
 
   # Print names from the --extra file(s), if given.
 
-  if args.extra and args.num_extra > 0:
+  if not args.rig and args.extra and args.num_extra > 0:
     extra_names = read_names_files(args.extra)
     print('---')
     unused_extra_names = randomize(get_unused_names(extra_names, used_names_lc))

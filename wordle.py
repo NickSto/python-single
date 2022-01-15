@@ -2,6 +2,7 @@
 import argparse
 import logging
 import pathlib
+import string
 import sys
 
 SCRIPT_DIR = pathlib.Path(__file__).resolve().parent
@@ -108,14 +109,21 @@ def score_word(word, freqs):
 
 
 def read_wordlist(word_file, wordlen=5):
-  words = []
+  words = set()
   for line_raw in word_file:
     fields = line_raw.rstrip('\r\n').split()
     if not fields or fields[0].startswith('#'):
       continue
     word = fields[0].lower()
-    if len(word) == wordlen:
-      words.append(word)
+    if len(word) != wordlen:
+      continue
+    invalid = False
+    for letter in word:
+      if letter not in string.ascii_lowercase:
+        invalid = True
+    if invalid:
+      continue
+    words.add(word)
   return words
 
 

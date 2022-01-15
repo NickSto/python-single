@@ -4,7 +4,9 @@ import logging
 import pathlib
 import sys
 
+SCRIPT_DIR = pathlib.Path(__file__).resolve().parent
 DEFAULT_WORDLIST = pathlib.Path('~/aa/misc/ghent-word-list.tsv').expanduser()
+DEFAULT_FREQ_LIST = SCRIPT_DIR/'wordle-freqs.tsv'
 DESCRIPTION = """How much can a simple script help solve wordles?
 This gives a list of the possible words that fit what you currently know based on your previous
 guesses. Thus it can't tell you what to guess first. But based on the letter frequency of 5 letter
@@ -25,6 +27,9 @@ def make_argparser():
   options.add_argument('-w', '--word-list', type=argparse.FileType('r'),
     default=DEFAULT_WORDLIST.open(),
     help=f'Word list to use. Default: {str(DEFAULT_WORDLIST)}')
+  options.add_argument('-f', '--letter-freqs', type=argparse.FileType('r'),
+    default=DEFAULT_FREQ_LIST.open(),
+    help='File containing the frequencies of letters in all --word-length words.')
   options.add_argument('-L', '--word-length', default=5)
   options.add_argument('-h', '--help', action='help',
     help='Print this argument help text and exit.')
@@ -52,7 +57,9 @@ def main(argv):
 
   words = read_wordlist(args.word_list, args.word_length)
   logging.info(f'Read {len(words)} {args.word_length} letter words.')
+  freqs = read_letter_freqs(args.letter_freqs)
 
+  candidates = []
   for word in words:
     candidate = True
     for letter, place in fixed.items():
@@ -65,7 +72,10 @@ def main(argv):
       if letter in word:
         candidate = False
     if candidate:
-      print(word)
+      candidates.append(word)
+
+  candidates.sort(key=lambda word: score_word(word, freqs), reverse=True)
+  print('\n'.join(candidates))
 
 
 def parse_fixed(fixed_str):
@@ -85,6 +95,18 @@ def parse_absent(absent_str, fixed):
   return absent
 
 
+def score_word(word, freqs):
+  score = 0
+  seen = set()
+  repeats = 0
+  for letter in word:
+    if letter in seen:
+      repeats += 1
+    seen.add(letter)
+    score += freqs[letter]
+  return score / (10**repeats)
+
+
 def read_wordlist(word_file, wordlen=5):
   words = []
   for line_raw in word_file:
@@ -95,6 +117,18 @@ def read_wordlist(word_file, wordlen=5):
     if len(word) == wordlen:
       words.append(word)
   return words
+
+
+def read_letter_freqs(freqs_file):
+  freqs = {}
+  for line_raw in freqs_file:
+    fields = line_raw.rstrip('\r\n').split()
+    if len(fields) < 2 or fields[0].startswith('#'):
+      continue
+    letter = fields[0]
+    count = int(fields[1])
+    freqs[letter] = count
+  return freqs
 
 
 def fail(message):

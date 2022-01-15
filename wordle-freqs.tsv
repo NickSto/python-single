@@ -1,0 +1,27 @@
+# awk 'NR > 1 && length($1) == 5 {print $1}' ~/aa/misc/ghent-word-list.tsv | tr '[:upper:]' '[:lower:]' | fold -w 1 | grep -E '[a-z]' | sort | uniq -c | sort -rg -k 1 | awk '{print $2 "\t" $1}'
+e	2036
+a	1692
+r	1406
+o	1314
+i	1169
+s	1137
+l	1120
+t	1112
+n	948
+u	797
+y	781
+c	750
+d	730
+p	649
+h	607
+m	580
+g	528
+b	512
+k	375
+f	370
+w	299
+v	228
+z	104
+x	90
+j	59
+q	46

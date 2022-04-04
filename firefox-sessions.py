@@ -48,13 +48,13 @@ def make_argparser():
          'used by the Session Manager extension.')
   parser.add_argument('-c', '--compress',
     help='Compress output into jsonlz4 and write to this file. Only works with --json output.')
-  parser.add_argument('-w', '--windows', metavar='window:tabs', nargs='*', default=(),
+  parser.add_argument('-w', '--windows', metavar='window:tabs', action='append', default=[],
     help='Select a certain set of windows to print, instead of the entire session. Use the format '
          '"WindowNum:NumTabs" (e.g. "2:375"). The two, colon-delimited numbers are the window '
          'number, as displayed by this script, and the number of tabs in it (to make sure we\'re '
-         'talking about the right window). Note: All the global session data will be included, no '
-         'matter what windows are chosen. Also, closed windows cannot be selected, even with '
-         '--closed.')
+         'talking about the right window). You can select multiple windows by giving this multiple '
+         'times. Note: All the global session data will be included, no matter what windows are '
+         'chosen. Also, closed windows cannot be selected, even with --closed.')
   parser.add_argument('-j', '--join', nargs='*', type=pathlib.Path, default=(),
     help='Combine the sessions from these files with the first one (after filtering by --windows).')
   parser.add_argument('-C', '--closed', action='store_true',

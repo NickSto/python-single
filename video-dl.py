@@ -29,8 +29,8 @@ SUPPORTED_SITES = {
     'qualities': {
       '360':'18',
       '640':'18',
-      '480':'135+250',  # 80k audio, 480p video
-      '720':'22',
+      '480':'135+250',  # 80k audio, 480p video (might not be available anymore)
+      '720':'22', # This might've changed. At least for QDQo2lJht7Y, 22 is basically the same as 18.
       '1280':'22',
     },
   },
@@ -64,7 +64,6 @@ SUPPORTED_SITES = {
     'domain':'tiktok.com'
   }
 }
-QUALITY_SITES = [name for name, site in SUPPORTED_SITES.items() if 'qualities' in site]
 
 
 def make_argparser():
@@ -76,8 +75,8 @@ def make_argparser():
   parser.add_argument('-F', '--formats', action='store_true',
     help='Just print the available video quality options.')
   parser.add_argument('-f', '--quality',
-    help='Video quality to request. Shorthands are available for {}. Anything else will be passed '
-      'on literally to youtube-dl.'.format(', '.join(QUALITY_SITES)))
+    help="Video quality to request. Will be passed on literally to youtube-dl unless it's a "
+      'shorthand. Shorthands are available for '+get_qualities_str(SUPPORTED_SITES))
   parser.add_argument('-o', '--outdir', type=pathlib.Path, default=pathlib.Path('.'),
     help='Save the video to this directory.')
   parser.add_argument('-n', '--get-filename', action='store_true')
@@ -180,6 +179,28 @@ def get_site(url):
   supported_sites_str = ', '.join([site['domain'] for site in SUPPORTED_SITES.values()])
   logging.error(f'Error: URL {url!r} is not from a supported site({supported_sites_str}).')
   return None
+
+
+def get_qualities_str(supported_sites):
+  qualities_strs = []
+  for site, info in supported_sites.items():
+    if 'qualities' in info:
+      mappings = {}
+      for shorthand, target in info['qualities'].items():
+        short_list = mappings.setdefault(target, [])
+        short_list.append(shorthand)
+      mapping_strs = []
+      for target, short_list in mappings.items():
+        mapping_str = '/'.join(short_list)+' →  '+target
+        mapping_strs.append(mapping_str)
+      quality_str = site+' ('+', '.join(mapping_strs)+')'
+      qualities_strs.append(quality_str)
+  if len(qualities_strs) == 1:
+    return qualities_strs[0]
+  elif len(qualities_strs) == 2:
+    return qualities_strs[0]+' and '+qualities_strs[1]
+  else:
+    return ', '.join(qualities_strs[:-1])+', and '+qualities_strs[-1]
 
 
 def get_quality_key(quality_arg, site):

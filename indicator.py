@@ -349,10 +349,10 @@ class Status():
     # Check if the last ping was dropped.
     if latency == 0.0:
       latency_str = 'DROP'
-    elif latency < 100:
-      latency_str = '{:0.1f} ms'.format(latency)
+    elif latency > 10:
+      latency_str = f'{latency:0.0f} ms'
     else:
-      latency_str = '{} ms'.format(int(latency))
+      latency_str = f'{latency:0.1f} ms'
     # How old is the last ping?
     # Use a fresh timestamp instead of `NOW`, in case execution has stalled and `NOW` is now *older*
     # than `timestamp`.

@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 import argparse
 import logging
+import math
 import string
 import sys
 import typing
@@ -38,24 +39,11 @@ def main(argv):
   for token in tokens:
     logging.info(f'{token.type:9}{token.value!r}')
 
-  # For now, only handle a simple expression with two numbers and one operator.
-  if len(tokens) != 3:
-    fail(f'Expression too long. Currently can only handle 3 tokens (saw {len(tokens)})')
-  elif not (tokens[0].is_value() and tokens[1].type == 'operator' and tokens[2].is_value()):
-    fail(f'Expression is the wrong form. Currently can only handle [value] [operator] [value].')
+  code_str = concat_tokens(tokens)
 
-  value1 = tokens[0].value
-  operator = tokens[1].value
-  value2 = tokens[2].value
+  math_props = {key:value for key, value in vars(math).items() if not key.startswith('_')}
 
-  if operator == '+':
-    result = value1 + value2
-  elif operator == '-':
-    result = value1 - value2
-  elif operator == '*':
-    result = value1 * value2
-  elif operator == '/':
-    result = value1 / value2
+  result = eval(code_str, math_props)
 
   logging.info(f'Result: {result!r}')
 
@@ -66,6 +54,8 @@ def parse_args(args):
   tokens = []
   for arg in args:
     arg_tokens = tokenize(arg)
+    if tokens:
+      tokens.append(Token.make('space', ' '))
     tokens.extend(arg_tokens)
   return tokens
 
@@ -74,69 +64,107 @@ class Token(typing.NamedTuple):
   type: str
   value: None
 
-  def is_value(self):
-    return self.type in ('time', 'int', 'float')
+  @classmethod
+  def make(cls, type_, raw_value):
+    if type_ in ('int_time', 'float_time'):
+      value = str(parse_time(raw_value))
+    else:
+      value = raw_value
+    return cls(type=type_, value=value)
 
 
 def tokenize(text):
   tokens = []
-  last = 0
-  current_token = None
+  start = 0
+  current_type = 'start'
   for i, char in enumerate(text):
-    if char in '-+/*':
-      # Operator
-      if current_token and i > 0:
-        tokens.append(cast_token(current_token, text[last:i]))
-      tokens.append(cast_token('operator', char))
-      last = i+1
-      current_token = None
+    if char == ' ':
+      # Space
+      # Don't count consecutive space characters (collapse them into one).
+      if current_type != 'space' and current_type != 'start':
+        # Store the last token if there was one (i > 0) and it wasn't a space.
+        tokens.append(Token.make(current_type, text[start:i]))
+      current_type = 'space'
+      start = i
     elif char in string.whitespace:
-      # Whitespace
-      if current_token and i > 0:
-        tokens.append(cast_token(current_token, text[last:i]))
-      last = i+1
-      current_token = None
+      # Non-space whitespace
+      if current_type != 'whitespace' and current_type != 'start':
+        tokens.append(Token.make(current_type, text[start:i]))
+        start = i
+      current_type = 'whitespace'
+    elif char in string.digits:
+      # Int
+      if current_type in ('dot', 'float'):
+        current_type = 'float'
+      elif current_type in ('int_time', 'float_time', 'identifier'):
+        pass
+      elif current_type != 'int' and current_type != 'start':
+        tokens.append(Token.make(current_type, text[start:i]))
+        start = i
+        current_type = 'int'
+      else:
+        current_type = 'int'
+    elif char == '.':
+      # Dot
+      if current_type == 'int':
+        current_type = 'float'
+      elif current_type == 'int_time':
+        current_type = 'float_time'
+      else:
+        tokens.append(Token.make(current_type, text[start:i]))
+        start = i
+        current_type = 'dot'
     elif char == ':':
       # Time
-      current_token = 'time'
-    elif char == '.':
-      # Float
-      if current_token == 'time':
-        raise ValueError(f'Cannot have a colon and period in a value: {text!r}')
-      current_token = 'float'
-    elif char in string.digits:
-      # Integer
-      if current_token not in ('time', 'float'):
-        current_token = 'int'
+      if current_type in ('int', 'int_time'):
+        current_type = 'int_time'
+      else:
+        if current_type == 'float_time':
+          # Maybe there could be situations where something like '12:17.3:' could be part of valid
+          # syntax. So let it pass, but at least print a warning.
+          logging.warning(f'Encountered a float in the middle of a time (char {i+1}) in {text!r}')
+        tokens.append(Token.make(current_type, text[start:i]))
+        start = i
+        current_type = 'other'
+    elif char in string.ascii_letters:
+      # Identifier
+      if current_type == 'identifier':
+        pass
+      else:
+        tokens.append(Token.make(current_type, text[start:i]))
+        start = i
+        current_type = 'identifier'
     else:
-      raise ValueError(f'Invalid character {char!r} in {text!r}')
-  if current_token:
-    tokens.append(cast_token(current_token, text[last:]))
+      # Other
+      if current_type != 'other' and current_type != 'start':
+        tokens.append(Token.make(current_type, text[start:i]))
+        start = i
+      current_type = 'other'
+  if current_type != 'start':
+    tokens.append(Token.make(current_type, text[start:]))
   return tokens
 
 
-def cast_token(type_, value_str):
-  if type_ == 'time':
-    value = parse_time(value_str)
-  elif type_ == 'float':
-    value = float(value_str)
-  elif type_ == 'int':
-    value = int(value_str)
-  elif type_ == 'operator':
-    value = value_str
-  else:
-    raise ValueError(f'Invalid token type {type_!r}')
-  return Token(type=type_, value=value)
-
-
 def parse_time(time_str):
-  """Turn a string like `"1:20"` into an integer like `80`."""
+  """Turn a string like `"1:20"` into a number like `80`.
+  Examples:
+    20 -> 20
+    1:20 -> 80
+    1:00:01 -> 3601
+    1:20.7 -> 80.7"""
   total = 0
   fields = time_str.split(':')
   for i, field in enumerate(reversed(fields)):
-    number = int(field)
-    total += number * 60**i
+    try:
+      value = int(field)
+    except ValueError:
+      value = float(field)
+    total += value * 60**i
   return total
+
+
+def concat_tokens(tokens):
+  return ''.join([token.value for token in tokens])
 
 
 def human_time(total_seconds, omit_sec=False):

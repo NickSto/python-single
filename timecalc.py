@@ -6,14 +6,18 @@ import string
 import sys
 import typing
 
-DESCRIPTION = """Do arithmetic on time values like "1:30\""""
+DESCRIPTION = """Do math on time values like "1:10:03".
+This will take the input expression, detect time-formatted values like "1:30" or "2:15.5",
+parse them into valid Python numbers like "90" and "135.5", then give the resulting expression back
+to Python to evaluate."""
 
 
 def make_argparser():
   parser = argparse.ArgumentParser(add_help=False, description=DESCRIPTION)
   options = parser.add_argument_group('Options')
-  options.add_argument('args', nargs='+',
-    help='The expression to compute')
+  options.add_argument('terms', nargs='+',
+    help='The expression to compute. You can give it all in one argument or put each term in its '
+      'own argument.')
   options.add_argument('-h', '--help', action='help',
     help='Print this argument help text and exit.')
   logs = parser.add_argument_group('Logging')
@@ -34,7 +38,7 @@ def main(argv):
 
   logging.basicConfig(stream=args.log, level=args.volume, format='%(message)s')
 
-  tokens = parse_args(args.args)
+  tokens = parse_terms(args.terms)
 
   for token in tokens:
     logging.info(f'{token.type:9}{token.value!r}')
@@ -50,13 +54,13 @@ def main(argv):
   print(human_time(result))
 
 
-def parse_args(args):
+def parse_terms(terms):
   tokens = []
-  for arg in args:
-    arg_tokens = tokenize(arg)
+  for term in terms:
+    term_tokens = tokenize(term)
     if tokens:
       tokens.append(Token.make('space', ' '))
-    tokens.extend(arg_tokens)
+    tokens.extend(term_tokens)
   return tokens
 
 
@@ -151,7 +155,11 @@ def parse_time(time_str):
     20 -> 20
     1:20 -> 80
     1:00:01 -> 3601
-    1:20.7 -> 80.7"""
+    1:20.7 -> 80.7
+  Technically this doesn't try to figure out what are hours, minutes, and seconds. It just
+  multiplies the right-most number by 1 (60**0), the one to its left by 60 (60**1), the next one by
+  3600 (60**2), etc. So the return value isn't necessarily in seconds. Instead, it's in the same
+  units as the right-most number in the input."""
   total = 0
   fields = time_str.split(':')
   for i, field in enumerate(reversed(fields)):

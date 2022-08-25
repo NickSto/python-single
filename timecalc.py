@@ -77,7 +77,30 @@ class Token(typing.NamedTuple):
     return cls(type=type_, value=value)
 
 
+#TODO: I could just use Pygments' lexer (though that wouldn't be as fun)
+# https://svn.python.org/projects/external/Pygments-1.1.1/docs/build/lexerdevelopment.html
 def tokenize(text):
+  """Break text into tokens of different types.
+  The main purpose is just to identify strings that represent times, so that they can be parsed into
+  integers and floats that are valid in Python. The rest of the string is to be left (mostly)
+  unaltered. The only current exception to that are runs of consecutive spaces, which are collapsed
+  into a single space.
+  Types of tokens:
+  `space`: Space characters (Unicode point 32). Runs of multiple spaces are collapsed, so the
+    `Token` value will be a single space, not the unaltered string from the input text.
+  `whitespace`: All non-space whitespace characters (anything in `string.whitespace`).
+    Any consecutive string of non-space whitespace characters will be grouped into a single `Token`.
+  `int`: A consecutive string of characters in `string.digits`.
+  `float`: Same as `int`, but contains a single `.` character. Can begin or end with a `.`.
+  `dot`:  A single `.` character.
+  `identifier`: This represents a valid Python identifier (e.g. variable name). It differs from the
+    spec, though, as this doesn't include non-ascii letters and Python 3 does. Here, the definition
+    is any sequence of characters in `string.digits` or `string.ascii_letters` which begins with a
+    letter.
+  `int_time`: A sequence of `int`s separated by `:` characters. Cannot begin with a `:`.
+  `float_time`: Same as `int_time`, but it ends with a `float`.
+  `other`: Any sequence which doesn't fit any of the other types. Usually symbols like operators.
+  Returns a list of `Token`s."""
   tokens = []
   start = 0
   current_type = 'start'
@@ -161,6 +184,8 @@ def parse_time(time_str):
   3600 (60**2), etc. So the return value isn't necessarily in seconds. Instead, it's in the same
   units as the right-most number in the input."""
   total = 0
+  if time_str.endswith(':'):
+    raise ValueError(f'Invalid time {time_str!r} (cannot end with a colon)')
   fields = time_str.split(':')
   for i, field in enumerate(reversed(fields)):
     try:

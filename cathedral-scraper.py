@@ -16,6 +16,10 @@ FILTER = {
   'Sanctuary Ministry Meeting', 'Racial Justice Task Force Meeting',
   'Martha&#8217;s Table Ministry', 'Reimagining the Oberammergau Passion Play after the Holocaust',
 }
+SEEN = {
+  ('Thursday, September 8, 2022', 'Bell Tower Climb'),
+  ('Saturday, September 17, 2022', 'Angels and Monsters Tower Climb'),
+}
 ZENITY_CMD = [
   'zenity', '--list', '--title', 'National Cathedral Events', '--width', '750', '--height', '300',
   '--print-column', '2', '--editable', '--column', 'Date', '--column', 'Event'
@@ -60,7 +64,7 @@ def main(argv):
   with tempfile.NamedTemporaryFile(mode='w+t', prefix='cathedral.', suffix='.txt') as tmpfile:
     results = 0
     for date, title in get_events(f'https://{DOMAIN}{CALENDAR_PATH}', headers, args.pages):
-      if title not in FILTER:
+      if title not in FILTER and (date, title) not in SEEN:
         results += 1
         print(date, file=tmpfile)
         print(title, file=tmpfile)

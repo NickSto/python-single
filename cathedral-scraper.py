@@ -5,6 +5,7 @@ import pathlib
 import subprocess
 import sys
 import tempfile
+import typing
 import requests
 
 DOMAIN = 'cathedral.org'
@@ -15,6 +16,7 @@ FILTER = {
   'Sunday Choral Evensong', 'Behind the Scenes Tour', 'Sightseeing Admission',
   'Sanctuary Ministry Meeting', 'Racial Justice Task Force Meeting',
   'Martha&#8217;s Table Ministry', 'Reimagining the Oberammergau Passion Play after the Holocaust',
+  'Blessing of the Animals'
 }
 SEEN = {
   ('Thursday, September 8, 2022', 'Bell Tower Climb'),
@@ -22,7 +24,8 @@ SEEN = {
 }
 ZENITY_CMD = [
   'zenity', '--list', '--title', 'National Cathedral Events', '--width', '750', '--height', '300',
-  '--print-column', '2', '--editable', '--column', 'Date', '--column', 'Event'
+  '--print-column', '4', '--editable', '--column', 'Date', '--column', 'Time', '--column', 'Event',
+  '--column', 'URL',
 ]
 SILENCE_FILE = pathlib.Path('~/.local/share/nbsdata/SILENCE').expanduser()
 DESCRIPTION = """Check upcoming events at the National Cathedral and show ones that might be a
@@ -63,15 +66,27 @@ def main(argv):
 
   with tempfile.NamedTemporaryFile(mode='w+t', prefix='cathedral.', suffix='.txt') as tmpfile:
     results = 0
-    for date, title in get_events(f'https://{DOMAIN}{CALENDAR_PATH}', headers, args.pages):
-      if title not in FILTER and (date, title) not in SEEN:
+    for event in get_events(f'https://{DOMAIN}{CALENDAR_PATH}', headers, args.pages):
+      if event.title not in FILTER and (event.date, event.title) not in SEEN:
         results += 1
-        print(date, file=tmpfile)
-        print(title, file=tmpfile)
+        print(event.date, event.time, event.title, event.url, sep='\n', file=tmpfile)
     # If we found results, display them in a dialog.
     if results > 0:
       tmpfile.seek(0)
       subprocess.run(ZENITY_CMD, stdin=tmpfile, check=True)
+
+
+class Event(typing.NamedTuple):
+  date: str
+  title: str
+  url: str
+  time: str
+  location: str
+  tickets: str
+  mapping = {
+    'title':'event_title', 'url':'event_url', 'time':'event_time', 'location':'event_location',
+    'tickets':'tickets_url'
+  }
 
 
 def get_events(url, headers, pages):
@@ -88,8 +103,10 @@ def get_events(url, headers, pages):
     for day in data['results']:
       date = day['date_header']
       for event in day['events']:
-        title = event['event_title']
-        yield date, title
+        data = {'date':date}
+        for attr, field in Event.mapping.items():
+          data[attr] = event.get(field)
+        yield Event(**data)
 
 
 def fail(message):

@@ -7,26 +7,18 @@ import sys
 import tempfile
 import typing
 import requests
+import yaml
 
 DOMAIN = 'cathedral.org'
 CALENDAR_PATH = '/wp-admin/admin-ajax.php'
 USER_AGENT = 'Mozilla/5.0 (X11; Ubuntu; Linux x86_64; rv:103.0) Gecko/20100101 Firefox/103.0'
-FILTER = {
-  'Online Morning Prayer', 'Weekday Choral Evensong', 'Carillon Recital', 'Holy Eucharist',
-  'Sunday Choral Evensong', 'Behind the Scenes Tour', 'Sightseeing Admission',
-  'Sanctuary Ministry Meeting', 'Racial Justice Task Force Meeting',
-  'Martha&#8217;s Table Ministry', 'Reimagining the Oberammergau Passion Play after the Holocaust',
-  'Blessing of the Animals'
-}
-SEEN = {
-  ('Thursday, September 8, 2022', 'Bell Tower Climb'),
-  ('Saturday, September 17, 2022', 'Angels and Monsters Tower Climb'),
-}
 ZENITY_CMD = [
   'zenity', '--list', '--title', 'National Cathedral Events', '--width', '750', '--height', '300',
   '--print-column', '4', '--editable', '--column', 'Date', '--column', 'Time', '--column', 'Event',
   '--column', 'URL',
 ]
+SCRIPT_DIR = pathlib.Path(__file__).resolve().parent
+DEFAULT_FILTER_FILE = SCRIPT_DIR / 'cathedral-filters.yml'
 SILENCE_FILE = pathlib.Path('~/.local/share/nbsdata/SILENCE').expanduser()
 DESCRIPTION = """Check upcoming events at the National Cathedral and show ones that might be a
 tower climb."""
@@ -38,6 +30,8 @@ def make_argparser():
   options.add_argument('pages', type=int, nargs='?', default=5,
     help='How many pages of events to request. 5 is usually enough to get about a month of '
       'results. Default: %(default)s')
+  options.add_argument('-f', '--filters', type=pathlib.Path, default=DEFAULT_FILTER_FILE,
+    help='File with filters. Default: %(default)s')
   options.add_argument('-h', '--help', action='help',
     help='Print this argument help text and exit.')
   logs = parser.add_argument_group('Logging')
@@ -58,6 +52,11 @@ def main(argv):
 
   logging.basicConfig(stream=args.log, level=args.volume, format='%(message)s')
 
+  with args.filters.open() as filters_file:
+    filters = yaml.safe_load(filters_file)
+  ignore = set(filters['ignore'])
+  seen = {(s['title'], s['date']) for s in filters['seen']}
+
   if SILENCE_FILE.exists():
     logging.warning(f'Warning: Silence file {str(SILENCE_FILE)} exists. Exiting..')
     return 1
@@ -67,7 +66,7 @@ def main(argv):
   with tempfile.NamedTemporaryFile(mode='w+t', prefix='cathedral.', suffix='.txt') as tmpfile:
     results = 0
     for event in get_events(f'https://{DOMAIN}{CALENDAR_PATH}', headers, args.pages):
-      if event.title not in FILTER and (event.date, event.title) not in SEEN:
+      if event.title not in ignore and (event.title, event.date) not in seen:
         results += 1
         print(event.date, event.time, event.title, event.url, sep='\n', file=tmpfile)
     # If we found results, display them in a dialog.

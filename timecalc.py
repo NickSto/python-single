@@ -18,6 +18,9 @@ def make_argparser():
   options.add_argument('terms', nargs='+',
     help='The expression to compute. You can give it all in one argument or put each term in its '
       'own argument.')
+  options.add_argument('-n', '--to-number', action='store_true',
+    help='Print the output as a regular number instead of a time-formatted number of minutes and '
+      'seconds (or hours and minutes, depending on the interpretation).')
   options.add_argument('-h', '--help', action='help',
     help='Print this argument help text and exit.')
   logs = parser.add_argument_group('Logging')
@@ -51,7 +54,10 @@ def main(argv):
 
   logging.info(f'Result: {result!r}')
 
-  print(human_time(result))
+  if args.to_number:
+    print(to_number(result))
+  else:
+    print(human_time(result))
 
 
 def parse_terms(terms):
@@ -244,6 +250,21 @@ def human_time(total_seconds, omit_sec=False):
     elif minutes_str.endswith(':'):
       minutes_str = minutes_str[:-1]
   return days_str+hours_str+minutes_str+seconds_str
+
+
+def to_number(input_num):
+  """Convert the input number to what `human_time()` would give, but with the minutes, seconds, etc
+  expressed as decimals."""
+  if input_num < 60:
+    result_float = input_num
+  elif input_num < 60*60:
+    result_float = input_num/60
+  else:
+    result_float = input_num/60/60
+  if int(result_float) == result_float:
+    return int(result_float)
+  else:
+    return result_float
 
 
 def fail(message):

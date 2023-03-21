@@ -10,6 +10,12 @@ import sys
 import urllib.parse
 assert sys.version_info.major >= 3, 'Python 3 required'
 
+# Downloading the "Save" playlists:
+# - these will sit for a while looking like they're doing nothing, but that's because
+#   (for some reason) youtube-dl takes a while download the playlist ids.
+# $ "$HOME/bin/video-dl.py" --playlist --check-existing "$HOME/Videos/Youtube" --quality 360 --outdir "$HOME/Videos/Youtube/0nsorted/360" 'https://www.youtube.com/playlist?list=PLG3QUVI_eBaOYc-GaSKIX4iH8q_wjcLOk'
+# $ "$HOME/bin/video-dl.py" --playlist --check-existing "$HOME/Videos/Youtube" --quality 720 --outdir "$HOME/Videos/Youtube/0nsorted/720" 'https://www.youtube.com/playlist?list=PLG3QUVI_eBaOV3xuHaltuqYuINP2pyuMB'
+
 #TODO: WARC??
 #      Looks like there's no WARC feature as of June 2020, though IA has requested the feature:
 #      https://github.com/ytdl-org/youtube-dl/issues/21983
@@ -18,7 +24,7 @@ assert sys.version_info.major >= 3, 'Python 3 required'
 #      Note: Currently, you get two video urls with this method. It seems one has the video, and
 #      the other has the audio. Not sure if you can select different qualities.
 
-DESCRIPTION = """Download and label a video using youtube-dl."""
+DESCRIPTION = """Download and label a video using yt-dlp."""
 YOUTUBE_DL_ARGS = ['--no-mtime', '--add-metadata', '--xattrs']
 VALID_CONVERSIONS = ['mp3', 'm4a', 'flac', 'aac', 'wav']
 SILENCE_PATH = pathlib.Path('~/.local/share/nbsdata/SILENCE').expanduser()
@@ -92,6 +98,9 @@ def make_argparser():
   parser.add_argument('-P', '--posted',
     help='The string to insert into the [posted YYYYMMDD] field, if none can be automatically '
       'determined.')
+  parser.add_argument('-Y', '--ytd', dest='exe', default='yt-dlp',
+    action='store_const', const='youtube-dl',
+    help='Use youtube-dl instead of yt-dlp.')
   parser.add_argument('-I', '--non-interactive', dest='interactive', default=True,
     action='store_const', const=False,
     help='Do not prompt the user for input. Proceed fully automatically.')
@@ -112,27 +121,29 @@ def main(argv):
 
   logging.basicConfig(stream=args.log, level=args.volume, format='%(message)s')
 
-  if not shutil.which('youtube-dl'):
-    fail("Error: 'youtube-dl' command not found.")
+  if not shutil.which(args.exe):
+    fail(f'Error: {args.exe!r} command not found.')
 
   if SILENCE_PATH.exists():
     fail(f'Error: Silence file exists: {str(SILENCE_PATH)!r}')
 
   if args.formats:
-    subprocess.run(('youtube-dl', '-F', args.url))
+    cmd = (args.exe, '-F', args.url)
+    logging.info(format_command(cmd))
+    subprocess.run(cmd)
     return
 
   if not args.playlist:
     download_video(
       args.url, args.quality, args.title, args.outdir, args.convert_to, args.posted,
-      args.interactive, args.get_filename
+      args.interactive, args.get_filename, args.exe
     )
   else:
     if args.check_existing:
       downloaded = set(get_ids_from_directory(args.check_existing))
     else:
       downloaded = set()
-    for vid in get_ids_from_playlist(args.url):
+    for vid in get_ids_from_playlist(args.url, args.exe):
       if vid in downloaded:
         logging.info(f'Info: Skipping video {vid}: already downloaded.')
         continue
@@ -140,11 +151,11 @@ def main(argv):
       url = get_url_from_id(vid, site)
       download_video(
         url, args.quality, args.title, args.outdir, args.convert_to, args.posted, False,
-        args.get_filename
+        args.get_filename, args.exe
       )
 
 
-def download_video(url, quality, title, outdir, convert_to, posted, interactive, get_filename):
+def download_video(url, quality, title, outdir, convert_to, posted, interactive, get_filename, exe):
   site = get_site(url)
   if site is None:
     fail('URL must be from a supported site.')
@@ -152,16 +163,16 @@ def download_video(url, quality, title, outdir, convert_to, posted, interactive,
   qual_key = get_quality_key(quality, site)
 
   formatter = Formatter(
-    site, url, title=title, convert=convert_to, interactive=interactive, posted=posted,
+    site, url, exe, title=title, convert=convert_to, interactive=interactive, posted=posted,
   )
   fmt_str = formatter.get_format_string()
 
   end_args = get_end_args(url, fmt_str, outdir, qual_key, convert_to)
 
   if get_filename:
-    cmd = ['youtube-dl', '--get-filename'] + end_args
+    cmd = [exe, '--get-filename'] + end_args
   else:
-    cmd = ['youtube-dl'] + YOUTUBE_DL_ARGS + end_args
+    cmd = [exe] + YOUTUBE_DL_ARGS + end_args
     # Kludge to work around bug in dailymotion downloader.
     if site['name'] == 'dailymotion':
       cmd.remove('--add-metadata')
@@ -238,9 +249,10 @@ def format_command(cmd):
 
 class Formatter:
 
-  def __init__(self, site, url, title=None, convert=False, interactive=True, posted=None):
+  def __init__(self, site, url, exe, title=None, convert=False, interactive=True, posted=None):
     self.site = site
     self.url = url
+    self.exe = exe
     self.convert = convert
     self.interactive = interactive
     self.posted = posted
@@ -257,7 +269,7 @@ class Formatter:
       return self.title+' '+metaformatter()
 
   def format_youtube(self):
-    uploader_id = get_format_value(self.url, 'uploader_id')
+    uploader_id = get_format_value(self.url, 'uploader_id', self.exe)
     # Only use both uploader and uploader_id if the id is a channel id like "UCZ5C1HBPMEcCA1YGQmqj6Iw"
     if re.search(r'^UC[a-zA-Z0-9_-]{22}$', uploader_id):
       return '[src %(uploader)s, %(uploader_id)s] [posted %(upload_date)s] [id %(id)s].%(ext)s'
@@ -285,6 +297,7 @@ class Formatter:
       good_url = True
     else:
       cmd = ('curl', '-s', '--write-out', '%{redirect_url}', '-o', os.devnull, url)
+      logging.info(format_command(cmd))
       result = subprocess.run(cmd, stdout=subprocess.PIPE)
       new_url = str(result.stdout, 'utf8')
       match = re.search(FACEBOOK_REGEX, new_url)
@@ -310,7 +323,7 @@ class Formatter:
     return self._format_instatwit()
 
   def _format_instatwit(self):
-    upload_date = get_format_value(self.url, 'upload_date')
+    upload_date = get_format_value(self.url, 'upload_date', self.exe)
     if upload_date == 'NA':
       if self.posted:
         posted_fmt = f'[posted {self.posted}] '
@@ -349,8 +362,9 @@ def get_posted_str(interactive):
   return posted_fmt
 
 
-def get_format_value(url, key):
-  cmd = ('youtube-dl', '--get-filename', '-o', f'%({key})s', url)
+def get_format_value(url, key, exe):
+  cmd = (exe, '--get-filename', '-o', f'%({key})s', url)
+  logging.info(format_command(cmd))
   result = subprocess.run(cmd, stdout=subprocess.PIPE)
   output = str(result.stdout, 'utf8')
   return output.rstrip('\r\n')
@@ -384,9 +398,10 @@ def parse_id_from_filename(filename):
   return fields2[0]
 
 
-def get_ids_from_playlist(url):
-  command = ['youtube-dl', '--get-id', url]
-  result = subprocess.run(command, encoding='utf8', stdout=subprocess.PIPE)
+def get_ids_from_playlist(url, exe):
+  cmd = (exe, '--get-id', url)
+  logging.info(format_command(cmd))
+  result = subprocess.run(cmd, encoding='utf8', stdout=subprocess.PIPE)
   return result.stdout.splitlines()
 
 

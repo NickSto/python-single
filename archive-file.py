@@ -27,6 +27,12 @@ def make_argparser():
   parser = argparse.ArgumentParser(description=DESCRIPTION)
   parser.add_argument('file',
     help='The file to back up.')
+  parser.add_argument('-g', '--group-name',
+    help='Use this option when the filename varies. All copies will be organized under this name '
+         "and considered different versions of the same file. Files won't be renamed when "
+         'archived, so they must have unique filenames.')
+  parser.add_argument('-n', '--new', action='store_true',
+    help="This is a new file (hasn't been archived before).")
   parser.add_argument('-d', '--destination',
     help='The directory the archive is/should be stored in. Default is the same directory the '
          'target file lives in.')
@@ -70,7 +76,7 @@ def main(argv):
     fail('Error: Target file {!r} smaller than --min-size ({} < {})'
          .format(args.file, os.path.getsize(args.file), args.min_size))
 
-  filename = os.path.basename(args.file)
+  group_name = args.group_name or os.path.basename(args.file)
   destination = args.destination or os.path.dirname(args.file)
   archive_tracker = args.archive_tracker or os.path.join(destination, '.archive-tracker')
 
@@ -78,12 +84,25 @@ def main(argv):
   if os.path.isfile(archive_tracker):
     with open(archive_tracker) as tracker_file:
       tracker = read_tracker(tracker_file, periods=PERIODS, expected_version=VERSION)
+  elif args.new:
+    tracker_section = {}
+    tracker = {group_name:tracker_section}
   else:
-    tracker = {filename:{}}
+    fail(
+      f"Tracker not found at {archive_tracker}. If this is a new file which hasn't been archived "
+      'yet, use --new.'
+    )
   try:
-    tracker_section = tracker[filename]
+    tracker_section = tracker[group_name]
   except KeyError:
-    fail('Error: Target file "{}" not found in tracker {}.'.format(filename, archive_tracker))
+    if args.new:
+      tracker_section = {}
+      tracker[group_name] = tracker_section
+    else:
+      fail(
+        f'Error: Target file/group "{group_name}" not found in tracker {archive_tracker}. If this '
+        "is a new file which hasn't been archived yet, use --new."
+      )
 
   # Determine which actions are needed.
   new_tracker_section, wanted = get_plan(tracker_section, destination, args.copies, periods=PERIODS,
@@ -92,9 +111,12 @@ def main(argv):
   # If new archives are needed, copy the target file to use as a new archive file, and update the
   # tracker with its path.
   if wanted:
-    archive_file_path = get_archive_path(args.file, destination, args.ext, now=args.now)
-    logging.info('Copying target file {} to {}'.format(args.file, archive_file_path))
-    shutil.copy2(args.file, archive_file_path)
+    if args.group_name:
+      archive_file_path = args.file
+    else:
+      archive_file_path = get_archive_path(args.file, destination, args.ext, now=args.now)
+      logging.info(f'Copying target file {args.file} to {archive_file_path}')
+      shutil.copy2(args.file, archive_file_path)
     add_new_file(new_tracker_section, wanted, archive_file_path, now=args.now)
 
   # Delete the now-unneeded archive files.
@@ -102,7 +124,7 @@ def main(argv):
   delete_files(files_to_delete, destination)
 
   # Write the updated tracker file.
-  tracker[filename] = new_tracker_section
+  tracker[group_name] = new_tracker_section
   write_tracker(tracker, archive_tracker, periods=PERIODS, version=VERSION)
 
 

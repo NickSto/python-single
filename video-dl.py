@@ -68,6 +68,16 @@ SUPPORTED_SITES = {
   },
   'tiktok': {
     'domain':'tiktok.com'
+  },
+  'patreon': {
+    'domain':'patreon.com',
+    'qualities': {
+      '360':'917',
+      '480':'1240',
+      '540':'1625',
+      '720':'2493',
+      '1080':'4712'
+    }
   }
 }
 
@@ -78,14 +88,18 @@ def make_argparser():
     help='Video url.')
   parser.add_argument('title', nargs='?',
     help='Video title for filename.')
-  parser.add_argument('-F', '--formats', action='store_true',
-    help='Just print the available video quality options.')
   parser.add_argument('-f', '--quality',
     help="Video quality to request. Will be passed on literally to youtube-dl unless it's a "
       'shorthand. Shorthands are available for '+get_qualities_str(SUPPORTED_SITES))
+  parser.add_argument('-F', '--formats', action='store_true',
+    help='Just fetch the available video quality options and print them.')
+  parser.add_argument('-q', '--qualities', action='store_true',
+    help='Just print the list of quality aliases for this site and what they map to.')
   parser.add_argument('-o', '--outdir', type=pathlib.Path, default=pathlib.Path('.'),
     help='Save the video to this directory.')
   parser.add_argument('-n', '--get-filename', action='store_true')
+  parser.add_argument('-b', '--cookies', type=pathlib.Path,
+    help='Netscape cookies file to pass to yt-dlp.')
   parser.add_argument('-c', '--convert-to', choices=VALID_CONVERSIONS,
     help='Give a file extension to convert the video to this audio format. The file will be named '
       '"{title}.{ext}".')
@@ -107,7 +121,7 @@ def make_argparser():
   parser.add_argument('-l', '--log', type=argparse.FileType('w'), default=sys.stderr,
     help='Print log messages to this file instead of to stderr. Warning: Will overwrite the file.')
   volume = parser.add_mutually_exclusive_group()
-  volume.add_argument('-q', '--quiet', dest='volume', action='store_const', const=logging.CRITICAL,
+  volume.add_argument('--quiet', dest='volume', action='store_const', const=logging.CRITICAL,
     default=logging.WARNING)
   volume.add_argument('-v', '--verbose', dest='volume', action='store_const', const=logging.INFO)
   volume.add_argument('-D', '--debug', dest='volume', action='store_const', const=logging.DEBUG)
@@ -133,10 +147,22 @@ def main(argv):
     subprocess.run(cmd)
     return
 
+  if args.qualities:
+    site = get_site(args.url)
+    qualities = site.get('qualities')
+    print('Quality aliases for {name}:'.format(**site))
+    if qualities is None:
+      print('  None')
+    else:
+      print('  Alias: yt-dlp identifier')
+      for alias, qid in qualities.items():
+        print(f'  {alias:>5s}: {qid}')
+    return
+
   if not args.playlist:
     download_video(
       args.url, args.quality, args.title, args.outdir, args.convert_to, args.posted,
-      args.interactive, args.get_filename, args.exe
+      args.interactive, args.get_filename, args.cookies, args.exe
     )
   else:
     if args.check_existing:
@@ -151,11 +177,13 @@ def main(argv):
       url = get_url_from_id(vid, site)
       download_video(
         url, args.quality, args.title, args.outdir, args.convert_to, args.posted, False,
-        args.get_filename, args.exe
+        args.get_filename, args.cookies, args.exe
       )
 
 
-def download_video(url, quality, title, outdir, convert_to, posted, interactive, get_filename, exe):
+def download_video(
+    url, quality, title, outdir, convert_to, posted, interactive, get_filename, cookies, exe
+  ):
   site = get_site(url)
   if site is None:
     fail('URL must be from a supported site.')
@@ -167,7 +195,7 @@ def download_video(url, quality, title, outdir, convert_to, posted, interactive,
   )
   fmt_str = formatter.get_format_string()
 
-  end_args = get_end_args(url, fmt_str, outdir, qual_key, convert_to)
+  end_args = get_end_args(url, fmt_str, outdir, qual_key, cookies, convert_to)
 
   if get_filename:
     cmd = [exe, '--get-filename'] + end_args
@@ -227,10 +255,12 @@ def get_quality_key(quality_arg, site):
   return None
 
 
-def get_end_args(url, fmt_str, outdir, qual_key, convert_to):
+def get_end_args(url, fmt_str, outdir, qual_key, cookies, convert_to):
   end_args = ['-o', str(outdir/fmt_str), url]
   if qual_key:
     end_args = ['-f', qual_key] + end_args
+  if cookies:
+    end_args = ['--cookies', str(cookies)] + end_args
   if convert_to:
     end_args = ['--extract-audio', '--audio-format', convert_to] + end_args
   return end_args
@@ -335,6 +365,12 @@ class Formatter:
     return posted_fmt+f'[src {domain}%%2F%(uploader_id)s] [id %(id)s].%(ext)s'
 
   def format_dailymotion(self):
+    return self._format_posted_url()
+
+  def format_patreon(self):
+    return self._format_posted_url()
+
+  def _format_posted_url(self):
     simple_url = self.simplify_url(self.url)
     return f'[posted %(upload_date)s] [src {simple_url}].%(ext)s'
 

@@ -399,11 +399,10 @@ def get_posted_str(interactive):
 
 
 def get_format_value(url, key, exe):
-  cmd = (exe, '--get-filename', '-o', f'%({key})s', url)
+  cmd = (exe, '--get-filename', '--playlist-items', '1', '-o', f'%({key})s', url)
   logging.info(format_command(cmd))
-  result = subprocess.run(cmd, stdout=subprocess.PIPE)
-  output = str(result.stdout, 'utf8')
-  return output.rstrip('\r\n')
+  result = subprocess.run(cmd, stdout=subprocess.PIPE, encoding='utf8')
+  return result.stdout.rstrip('\r\n')
 
 
 def double_escape_url(url):

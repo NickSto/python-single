@@ -93,6 +93,8 @@ def make_argparser():
       'shorthand. Shorthands are available for '+get_qualities_str(SUPPORTED_SITES))
   parser.add_argument('-F', '--formats', action='store_true',
     help='Just fetch the available video quality options and print them.')
+  parser.add_argument('-g', '--generic', action='store_true',
+    help="Force download on an unsupported site, using generic parameters.")
   parser.add_argument('-q', '--qualities', action='store_true',
     help='Just print the list of quality aliases for this site and what they map to.')
   parser.add_argument('-o', '--outdir', type=pathlib.Path, default=pathlib.Path('.'),
@@ -162,7 +164,7 @@ def main(argv):
   if not args.playlist:
     download_video(
       args.url, args.quality, args.title, args.outdir, args.convert_to, args.posted,
-      args.interactive, args.get_filename, args.cookies, args.exe
+      args.interactive, args.get_filename, args.cookies, args.exe, args.generic
     )
   else:
     if args.check_existing:
@@ -177,21 +179,26 @@ def main(argv):
       url = get_url_from_id(vid, site)
       download_video(
         url, args.quality, args.title, args.outdir, args.convert_to, args.posted, False,
-        args.get_filename, args.cookies, args.exe
+        args.get_filename, args.cookies, args.exe, args.generic
       )
 
 
 def download_video(
-    url, quality, title, outdir, convert_to, posted, interactive, get_filename, cookies, exe
+    url, quality, title, outdir, convert_to, posted, interactive, get_filename, cookies, exe,
+    generic=False
   ):
   site = get_site(url)
   if site is None:
-    fail('URL must be from a supported site.')
+    if generic:
+      site = {'name':None}
+    else:
+      fail('URL must be from a supported site.')
 
   qual_key = get_quality_key(quality, site)
 
   formatter = Formatter(
     site, url, exe, title=title, convert=convert_to, interactive=interactive, posted=posted,
+    generic=generic
   )
   fmt_str = formatter.get_format_string()
 
@@ -216,7 +223,7 @@ def get_site(url):
       site['name'] = name
       return site
   supported_sites_str = ', '.join([site['domain'] for site in SUPPORTED_SITES.values()])
-  logging.error(f'Error: URL {url!r} is not from a supported site({supported_sites_str}).')
+  logging.error(f'URL {url!r} is not from a supported site ({supported_sites_str}).')
   return None
 
 
@@ -279,13 +286,16 @@ def format_command(cmd):
 
 class Formatter:
 
-  def __init__(self, site, url, exe, title=None, convert=False, interactive=True, posted=None):
+  def __init__(
+      self, site, url, exe, title=None, convert=False, interactive=True, posted=None, generic=None
+    ):
     self.site = site
     self.url = url
     self.exe = exe
     self.convert = convert
     self.interactive = interactive
     self.posted = posted
+    self.generic = generic
     if title is None:
       self.title = '%(title)s'
     else:
@@ -294,29 +304,34 @@ class Formatter:
   def get_format_string(self):
     if self.convert:
       return self.title+'.%(ext)s'
+    elif self.generic:
+      return self.title+self.format_generic()
     else:
       metaformatter = getattr(self, 'format_{name}'.format(**self.site))
-      return self.title+' '+metaformatter()
+      return self.title+metaformatter()
+
+  def format_generic(self):
+    return '.%(ext)s'
 
   def format_youtube(self):
     uploader_id = get_format_value(self.url, 'uploader_id', self.exe)
     # Only use both uploader and uploader_id if the id is a channel id like "UCZ5C1HBPMEcCA1YGQmqj6Iw"
     if re.search(r'^UC[a-zA-Z0-9_-]{22}$', uploader_id):
-      return '[src %(uploader)s, %(uploader_id)s] [posted %(upload_date)s] [id %(id)s].%(ext)s'
+      return ' [src %(uploader)s, %(uploader_id)s] [posted %(upload_date)s] [id %(id)s].%(ext)s'
     else:
       logging.warning(
         f'uploader_id {uploader_id} looks like a username, not a channel id. Omitting channel id..'
       )
-      return '[src %(uploader_id)s] [posted %(upload_date)s] [id %(id)s].%(ext)s'
+      return ' [src %(uploader_id)s] [posted %(upload_date)s] [id %(id)s].%(ext)s'
 
   def format_vimeo(self):
-    return '[src vimeo.com%%2F%(uploader_id)s] [posted %(upload_date)s] [id %(id)s].%(ext)s'
+    return ' [src vimeo.com%%2F%(uploader_id)s] [posted %(upload_date)s] [id %(id)s].%(ext)s'
 
   def format_twitch(self):
     match = re.search(r'^https?://clips.twitch.tv/([^/?]+)((\?|/).*)?$', self.url)
     assert match, self.url
     video_id = match.group(1)
-    return f'[src twitch.tv%%2F%(creator)s] [posted %(upload_date)s] [id {video_id}].%(ext)s'
+    return f' [src twitch.tv%%2F%(creator)s] [posted %(upload_date)s] [id {video_id}].%(ext)s'
 
   def format_facebook(self):
     FACEBOOK_REGEX = r'facebook\.com/[^/?]+/videos/[0-9]+'
@@ -335,7 +350,7 @@ class Formatter:
         url = new_url
         good_url = True
     escaped_url = self.simplify_url(url)
-    return f'[posted %(upload_date)s] [src {escaped_url}].%(ext)s'
+    return f' [posted %(upload_date)s] [src {escaped_url}].%(ext)s'
 
   #TODO: Figure out how to get the username.
   #      Tiktok urls look like `https://www.tiktok.com/@wallacenoises/video/6915592857738923269`.
@@ -344,7 +359,7 @@ class Formatter:
   #      gives the user's display name, and `channel`, `channel_id`, and `creator` all give "NA".
   def format_tiktok(self):
     escaped_url = self.simplify_url(self.url)
-    return f'[posted %(upload_date)s] [src {escaped_url}].%(ext)s'
+    return f' [posted %(upload_date)s] [src {escaped_url}].%(ext)s'
 
   def format_instagram(self):
     return self._format_instatwit()
@@ -356,19 +371,19 @@ class Formatter:
     upload_date = get_format_value(self.url, 'upload_date', self.exe)
     if upload_date == 'NA':
       if self.posted:
-        posted_fmt = f'[posted {self.posted}] '
+        posted_fmt = f'posted {self.posted}] '
       else:
         posted_fmt = get_posted_str(self.interactive)
     else:
       posted_fmt = '[posted %(upload_date)s] '
     domain = self.site['domain']
-    return posted_fmt+f'[src {domain}%%2F%(uploader_id)s] [id %(id)s].%(ext)s'
+    return f' {posted_fmt}[src {domain}%%2F%(uploader_id)s] [id %(id)s].%(ext)s'
 
   def format_dailymotion(self):
-    return self._format_posted_url()
+    return ' '+self._format_posted_url()
 
   def format_patreon(self):
-    return self._format_posted_url()
+    return ' '+self._format_posted_url()
 
   def _format_posted_url(self):
     simple_url = self.simplify_url(self.url)

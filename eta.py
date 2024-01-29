@@ -22,10 +22,11 @@ def make_argparser():
     help='The whitespace-delimited field of the output to use as the count (1-based).')
   options.add_argument('-e', '--eval', action='store_true', default=False,
     help='The first "command" argument is a full command line. Execute as a literal shell line.')
-  options.add_argument('-p', '--pause', type=lambda m: float(m)*60, default=5*60,
-    help='Minutes to wait between checks. Default: %(default)s')
+  options.add_argument('-p', '--pause', type=float, default=5*60,
+    help='Seconds to wait between checks. Default: %(default)d')
   options.add_argument('-i', '--initial-pause', type=int, default=15,
-    help='Seconds to wait before the first check. Default: %(default)s')
+    help='Seconds to wait before the second check (the first one that gives an ETA). '
+      'Default: %(default)s')
   options.add_argument('-t', '--start-time', type=int, default=time.time(),
     help='The starting time, if continuing from a previous run.')
   options.add_argument('-s', '--start-count', type=float,
@@ -58,7 +59,9 @@ def main(argv):
   else:
     start_count = get_current_count(args.command, args.field, args.eval)
 
-  print(f'Initial time: {int(args.start_time)} | Initial count: {start_count} | Goal: {args.goal}')
+  start = int(args.start_time)
+  ratio = start_count/args.goal
+  print(f'Initial time: {start} | Initial count: {start_count} ({ratio:0.1%}) | Goal: {args.goal}')
 
   watch_progress(
     args.start_time, start_count, args.goal, args.command, args.field, args.pause, args.eval,
@@ -82,7 +85,7 @@ def watch_progress(start_time, start_count, goal, command, field, pause, eval_, 
     now = time.time()
     remaining = calc_remaining(start_count, start_time, current_count, now, goal)
     if remaining > 0:
-      print(format_status(current_count, remaining, now))
+      print(format_status(current_count, goal, now, remaining))
 
 
 def sleep(pause, initial_pause, first_loop):
@@ -117,10 +120,14 @@ def parse_result(result_str, field):
     return float(value_str)
 
 
-def format_status(current_count, remaining, now):
-  remaining_str = human_time_amount(remaining)
-  eta_str = human_timestamp(now+remaining)
-  return f'Current: {current_count} | ETA: {eta_str} ({remaining_str})'
+def format_status(current_count, goal, now, remaining):
+  current_str = f'Current: {current_count} ({current_count/goal:0.1%})'
+  if remaining == float('inf'):
+    return f'{current_str} | ETA: ??? (count has decreased)'
+  else:
+    remaining_str = human_time_amount(remaining)
+    eta_str = human_timestamp(now+remaining)
+    return f'{current_str} | ETA: {eta_str} ({remaining_str})'
 
 
 def calc_remaining(start_count, start_time, current_count, current_time, goal):
@@ -132,9 +139,12 @@ def calc_remaining(start_count, start_time, current_count, current_time, goal):
     # We're counting down to the goal.
     progress = start_count - current_count
     count_left = current_count - goal
-  elapsed = current_time - start_time
-  count_per_sec = progress / elapsed
-  return count_left / count_per_sec
+  if progress < 0:
+    return float('inf')
+  else:
+    elapsed = current_time - start_time
+    count_per_sec = progress / elapsed
+    return count_left / count_per_sec
 
 
 def human_timestamp(timestamp):

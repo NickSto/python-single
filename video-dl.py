@@ -162,25 +162,45 @@ def main(argv):
     return
 
   if not args.playlist:
-    download_video(
+    result = download_video(
       args.url, args.quality, args.title, args.outdir, args.convert_to, args.posted,
       args.interactive, args.get_filename, args.cookies, args.exe, args.generic
     )
+    return result.returncode
   else:
+    failures = []
     if args.check_existing:
       downloaded = set(get_ids_from_directory(args.check_existing))
     else:
       downloaded = set()
-    for vid in get_ids_from_playlist(args.url, args.exe):
-      if vid in downloaded:
-        logging.info(f'Info: Skipping video {vid}: already downloaded.')
+    vid_ids, stderr = get_ids_from_playlist(args.url, args.exe)
+    for vid_id in vid_ids:
+      if vid_id in downloaded:
+        logging.info(f'Info: Skipping video {vid_id}: already downloaded.')
         continue
       site = get_site(args.url)
-      url = get_url_from_id(vid, site)
-      download_video(
-        url, args.quality, args.title, args.outdir, args.convert_to, args.posted, False,
+      url = get_url_from_id(vid_id, site)
+      dl_args = (
+        args.title, args.outdir, args.convert_to, args.posted, False,
         args.get_filename, args.cookies, args.exe, args.generic
       )
+      result = download_video(url, args.quality, *dl_args)
+      if get_outcome(result) == 'quality':
+        logging.warning(
+          f'Did not find {vid_id} in quality {args.quality!r}. Retrying without a quality..'
+        )
+        result = download_video(url, None, *dl_args)
+      if result.returncode != 0:
+        failures.append(vid_id)
+    for status, vid_id in parse_stderr(stderr):
+      failures.append(vid_id)
+    if failures:
+      if len(failures) == 1:
+        plural = ''
+      else:
+        plural = 's'
+      logging.error(f'Failed to download {len(failures)} video{plural}: {", ".join(failures)}')
+      return 1
 
 
 def download_video(
@@ -212,7 +232,10 @@ def download_video(
     if site['name'] == 'dailymotion':
       cmd.remove('--add-metadata')
     print(format_command(cmd))
-  subprocess.run(cmd)
+  print(f'Downloading {url}..')
+  result = subprocess.run(cmd, stderr=subprocess.PIPE, encoding='utf8')
+  print(result.stderr, end='')
+  return result
 
 
 def get_site(url):
@@ -225,6 +248,28 @@ def get_site(url):
   supported_sites_str = ', '.join([site['domain'] for site in SUPPORTED_SITES.values()])
   logging.error(f'URL {url!r} is not from a supported site ({supported_sites_str}).')
   return None
+
+
+def get_outcome(result):
+  if result.returncode == 0:
+    return 'success'
+  for status, vid_id in parse_stderr(result.stderr):
+    return status
+  return result.returncode
+
+
+def parse_stderr(stderr):
+  for line in stderr.splitlines():
+    if line.startswith('ERROR: [youtube]'):
+      match = re.search(r'^ERROR: \[youtube\] ([^:]+): ', line)
+      if match:
+        vid_id = match.group(1)
+      else:
+        vid_id = None
+      if 'Requested format is not available' in line:
+        yield 'quality', vid_id
+      elif 'Private video' in line:
+        yield 'private', vid_id
 
 
 def get_qualities_str(supported_sites):
@@ -450,9 +495,11 @@ def parse_id_from_filename(filename):
 
 def get_ids_from_playlist(url, exe):
   cmd = (exe, '--get-id', url)
+  print('Getting video ids from playlist..')
   logging.info(format_command(cmd))
-  result = subprocess.run(cmd, encoding='utf8', stdout=subprocess.PIPE)
-  return result.stdout.splitlines()
+  result = subprocess.run(cmd, encoding='utf8', stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+  print(result.stderr, end='')
+  return result.stdout.splitlines(), result.stderr
 
 
 def get_url_from_id(vid, site):

@@ -60,6 +60,9 @@ SUPPORTED_SITES = {
   'twitter': {
     'domain':'twitter.com'
   },
+  'x': {
+    'domain':'x.com'
+  },
   'dailymotion': {
     'domain':'dailymotion.com'
   },
@@ -410,6 +413,9 @@ class Formatter:
     return self._format_instatwit()
 
   def format_twitter(self):
+    return self._format_instatwit()
+
+  def format_x(self):
     return self._format_instatwit()
 
   def _format_instatwit(self):

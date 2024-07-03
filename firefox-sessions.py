@@ -21,6 +21,12 @@ In that folder, you'll find (as of Firefox 59) recovery.jsonlz4 and previous.jso
 The former is saved periodically during your browsing session, while the latter should be a
 snapshot of your former browsing session, saved on shutdown."""
 
+#TODO: The session files seem to include all my cookies.
+#      See: $ jq -r '.cookies[].host' session.json
+#      I need to find a way to sanitize them out of the session files I save, but then re-introduce
+#      them when I write them back into Firefox's directory.
+#      On the other hand, Firefox's own recovery.jsonlz4 is always sitting there, readable by me.
+#      For now I can just make sure the permissions on my backups are at least as strict.
 
 def make_argparser():
   parser = argparse.ArgumentParser(description=DESCRIPTION)
@@ -55,7 +61,7 @@ def make_argparser():
          'talking about the right window). You can select multiple windows by giving this multiple '
          'times. Note: All the global session data will be included, no matter what windows are '
          'chosen. Also, closed windows cannot be selected, even with --closed.')
-  parser.add_argument('-j', '--join', nargs='*', type=pathlib.Path, default=(),
+  parser.add_argument('-j', '--join', action='append', type=pathlib.Path, default=[],
     help='Combine the sessions from these files with the first one (after filtering by --windows).')
   parser.add_argument('-C', '--closed', action='store_true',
     help='Include closed windows in the human and tsv outputs.')

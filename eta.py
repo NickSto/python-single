@@ -74,7 +74,7 @@ def main(argv):
 
 def watch_progress(start_time, start_count, goal, command, field, pause, eval_, initial_pause):
   first_loop = True
-  current_count = start_count
+  current_count = last_count = start_count
   remaining = 1
   while remaining > 0:
     first_loop = sleep(pause, initial_pause, first_loop)
@@ -85,7 +85,8 @@ def watch_progress(start_time, start_count, goal, command, field, pause, eval_, 
     now = time.time()
     remaining = calc_remaining(start_count, start_time, current_count, now, goal)
     if remaining > 0:
-      print(format_status(current_count, goal, now, remaining))
+      print(format_status(current_count, last_count, goal, now, remaining))
+    last_count = current_count
 
 
 def sleep(pause, initial_pause, first_loop):
@@ -120,8 +121,10 @@ def parse_result(result_str, field):
     return float(value_str)
 
 
-def format_status(current_count, goal, now, remaining):
-  current_str = f'Current: {current_count} ({current_count/goal:0.1%})'
+def format_status(current_count, last_count, goal, now, remaining):
+  diff = current_count - last_count
+  sign = '' if diff < 0 else '+'
+  current_str = f'Current: {current_count} ({sign}{diff}, {current_count/goal:0.1%})'
   if remaining == float('inf'):
     return f'{current_str} | ETA: ??? (count has decreased)'
   else:

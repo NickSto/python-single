@@ -8,6 +8,8 @@ from typing import Iterable, Literal, Optional, NoReturn, Sequence, Union
 CSV_FORMAT = {'dialect':'unix', 'delimiter':'\t', 'quoting':csv.QUOTE_MINIMAL, 'strict':True}
 DESCRIPTION = """Format a table into human-readable and markup formats."""
 
+#TODO: Option to specify columns to align left or right. Use cut -f syntax.
+#TODO: Correctly format Markdown and Jira tables without headers.
 
 def make_argparser():
     parser = argparse.ArgumentParser(add_help=False, description=DESCRIPTION)
@@ -31,6 +33,9 @@ def make_argparser():
         help='Rotate the output table so the rows become columns and vice versa.')
     options.add_argument('-S', '--shrink-wrap', dest='pad', action='store_false', default=True,
         help='When printing in text format, do not pad the cells with extra spaces.')
+    options.add_argument('-N', '--not-numbers', dest='not_numbers', type=str,
+        help='Columns that should not be treated as numbers (right-aligned, formatted with commas). '
+            'Specify columns using 1-based `cut -f` syntax, e.g., "1,3-5".')
     options.add_argument('-h', '--help', action='help',
         help='Print this argument help text and exit.')
     logs = parser.add_argument_group('Logging')
@@ -51,7 +56,11 @@ def main(*argv: str) -> Optional[int]:
 
     logging.basicConfig(stream=args.log, level=args.volume, format='%(message)s')
 
-    headers, body = parse_table(args.table, args.headers, args.rotate)
+    str_columns: set[int] = set()
+    if args.not_numbers is not None:
+        str_columns = parse_columns_spec(args.not_numbers)
+
+    headers, body = parse_table(args.table, args.headers, args.rotate, str_columns)
     print_table(headers, body, output_format=args.format, pad=args.pad)
 
     return None
@@ -62,21 +71,38 @@ RowSet = Sequence[Row]
 Alignment = Literal["left","right",None]
 
 
+def parse_columns_spec(spec: str) -> set[int]:
+    columns: set[int] = set()
+    for part in spec.split(','):
+        if '-' in part:
+            start, end = part.split('-', 1)
+            columns.update(range(int(start), int(end) + 1))
+        else:
+            columns.add(int(part))
+    return columns
+
+
 def parse_table(
-    lines: Iterable[str], num_headers: int, rotate: bool = False
+    lines: Iterable[str], num_headers: int, rotate: bool = False,
+    str_columns: set[int] | None = None,
 ) -> tuple[list[list[Value]], list[list[Value]]]:
     headers: list[list[Value]] = []
     body: list[list[Value]] = []
+    if str_columns is None:
+        str_columns = set()
     for row_num, raw_row in enumerate(csv.reader(lines, **CSV_FORMAT), 1):
         row = []
-        for raw_value in raw_row:
-            try:
-                value: Value = int(raw_value)
-            except ValueError:
+        for col_num, raw_value in enumerate(raw_row, 1):
+            if col_num in str_columns:
+                value: Value = raw_value
+            else:
                 try:
-                    value = float(raw_value)
+                    value = int(raw_value)
                 except ValueError:
-                    value = raw_value
+                    try:
+                        value = float(raw_value)
+                    except ValueError:
+                        value = raw_value
             row.append(value)
         if not rotate:
             if row_num <= num_headers:
@@ -142,11 +168,11 @@ def render_text_table(
     lines = []
     # Render the header line.
     for header in headers:
-        line = render_row(header, widths, header_delim, pad, edge_delims)
+        line = render_row(header, widths, header_delim, pad, edge_delims, is_header=True)
         lines.append(line)
     # Render the separator line if needed. Currently only applies to Markdown.
     if header_sep:
-        alignments = get_alignments(headers, body)
+        alignments = get_alignments(body)
         line = render_separator(widths, body_delim, alignments, pad)
         lines.append(line)
     # Render the body lines.
@@ -156,7 +182,10 @@ def render_text_table(
     return lines
 
 
-def render_row(row: Row, widths: Sequence[int], delim: str, pad: bool, edge_delims: bool) -> str:
+def render_row(
+    row: Row, widths: Sequence[int], delim: str, pad: bool, edge_delims: bool,
+    is_header: bool = False,
+) -> str:
     line = ''
     if edge_delims:
         line = delim
@@ -164,7 +193,13 @@ def render_row(row: Row, widths: Sequence[int], delim: str, pad: bool, edge_deli
         width = widths[col] - len(delim)
         if pad:
             width += 1
-        if isinstance(value, str):
+        if is_header:
+            str_value = str(value)
+            if pad:
+                cell = f'{str_value:^{width + 1}}'
+            else:
+                cell = f'{str_value:^{width}}'
+        elif isinstance(value, str):
             cell = f'{value:<{width}}'
             if pad:
                 cell = ' ' + cell
@@ -178,27 +213,26 @@ def render_row(row: Row, widths: Sequence[int], delim: str, pad: bool, edge_deli
     return line
 
 
-def get_alignments(headers: RowSet, body: RowSet) -> list[Alignment]:
+def get_alignments(body: RowSet) -> list[Alignment]:
     alignments: list[Alignment] = []
     first_row = True
-    for section, rows in zip(('header', 'body'),(headers, body)):
-        for row in rows:
-            for col_num, value in enumerate(row):
-                if isinstance(value, str):
-                    alignment: Alignment = 'left'
-                else:
-                    alignment = 'right'
-                if first_row:
-                    alignments.append(alignment)
-                else:
-                    current = alignments[col_num]
-                    if current is not None and current != alignment:
-                        #TODO: Do something more clever when there's disagreement.
-                        #      I'm thinking right should override left. More important that numbers
-                        #      be right-aligned. Also, I could provide a command line option.
-                        alignment = None
-                    alignments[col_num] = alignment
-            first_row = False
+    for row in body:
+        for col_num, value in enumerate(row):
+            if isinstance(value, str):
+                alignment: Alignment = 'left'
+            else:
+                alignment = 'right'
+            if first_row:
+                alignments.append(alignment)
+            else:
+                current = alignments[col_num]
+                if current is not None and current != alignment:
+                    #TODO: Do something more clever when there's disagreement.
+                    #      I'm thinking right should override left. More important that numbers
+                    #      be right-aligned. Also, I could provide a command line option.
+                    alignment = None
+                alignments[col_num] = alignment
+        first_row = False
     return alignments
 
 
@@ -235,33 +269,16 @@ def get_column_widths(
             delim_len = body_delim_len
         for row in rows:
             for col_num, value in enumerate(row):
-                value_width = len(format_value(value)) + delim_len
+                if section == 'header':
+                    value_width = len(str(value)) + delim_len
+                else:
+                    value_width = len(format_value(value)) + delim_len
                 if first_row:
                     widths.append(value_width)
                 else:
                     widths[col_num] = max(widths[col_num], value_width)
             first_row = False
     return widths
-
-
-def markdown_separator(widths: Sequence[int], left_aligned_columns: Sequence[bool]) -> str:
-    cells = []
-    for width, is_left_aligned in zip(widths, left_aligned_columns):
-        if is_left_aligned:
-            cells.append(':' + '-' * (width + 1))
-        else:
-            cells.append('-' * (width + 1) + ':')
-    return '|' + '|'.join(cells) + '|'
-
-
-def pad_cells(cells: Sequence[str], widths: Sequence[int], left_aligned_columns: Sequence[bool]) -> list[str]:
-    padded = []
-    for value, width, is_left_aligned in zip(cells, widths, left_aligned_columns):
-        if is_left_aligned:
-            padded.append(f'{value:<{width}}')
-        else:
-            padded.append(f'{value:>{width}}')
-    return padded
 
 
 def format_value(value: str|int|float) -> str:
